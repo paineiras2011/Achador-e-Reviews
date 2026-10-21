@@ -1082,6 +1082,12 @@ app.get('/robots.txt', (req: Request, res: Response) => {
   res.send(`User-agent: *\nAllow: /\nDisallow: /admin\nSitemap: ${host}/sitemap.xml\n`);
 });
 
+// Endpoint para validação do Google Search Console via Arquivo HTML
+app.get('/google:id.html', (req: Request, res: Response) => {
+  res.type('text/html');
+  res.send(`google-site-verification: google${req.params.id}.html\n`);
+});
+
 // Endpoint dinâmico de sitemap.xml para Google Search Console
 app.get('/sitemap.xml', (req: Request, res: Response) => {
   const host = `${req.protocol}://${req.get('host')}`;

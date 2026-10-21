@@ -32,8 +32,10 @@ export const Hero: React.FC<HeroProps> = ({
   const [isPaused, setIsPaused] = useState(false);
   const [direction, setDirection] = useState<'next' | 'prev'>('next');
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const touchStartX = useRef<number | null>(null);
+  const touchEndX = useRef<number | null>(null);
 
-  // Auto-rotation every 5.5 seconds unless user hovers
+  // Auto-rotation every 5.5 seconds unless explicitly paused by user
   useEffect(() => {
     if (items.length <= 1 || isPaused) {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -64,12 +66,33 @@ export const Hero: React.FC<HeroProps> = ({
     setCurrentIndex((prev) => (prev + 1) % items.length);
   };
 
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.targetTouches[0].clientX;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    touchEndX.current = e.targetTouches[0].clientX;
+  };
+
+  const handleTouchEnd = () => {
+    if (touchStartX.current === null || touchEndX.current === null) return;
+    const diff = touchStartX.current - touchEndX.current;
+    if (diff > 45) {
+      handleNext();
+    } else if (diff < -45) {
+      handlePrev();
+    }
+    touchStartX.current = null;
+    touchEndX.current = null;
+  };
+
   return (
     <section 
       aria-label="Carrossel de Avaliações em Destaque"
       className="relative overflow-hidden bg-[#0B132B] text-white py-10 md:py-14 border-b border-slate-800 transition-colors select-none"
-      onMouseEnter={() => setIsPaused(true)}
-      onMouseLeave={() => setIsPaused(false)}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
     >
       {/* Background glow effects */}
       <div className="absolute top-0 right-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -126,7 +149,7 @@ export const Hero: React.FC<HeroProps> = ({
         </div>
 
         {/* Slide Content */}
-        <div key={current.id} className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center transition-all duration-300 ease-in-out">
+        <div key={current.id} className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center transition-all duration-300 ease-out animate-in fade-in zoom-in-98">
           
           {/* Left Text Column */}
           <div className="lg:col-span-7 space-y-4">

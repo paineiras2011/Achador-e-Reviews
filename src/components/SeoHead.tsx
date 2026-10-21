@@ -54,13 +54,19 @@ export const SeoHead: React.FC<SeoHeadProps> = ({
     }
 
     // Google Search Console Site Verification
-    if (settings?.googleSiteVerification) {
-      let code = settings.googleSiteVerification.trim();
-      const match = code.match(/content=["']([^"']+)["']/i);
-      if (match) {
-        code = match[1];
-      }
-      updateMeta('google-site-verification', code);
+    const rawVerification = settings?.googleSiteVerification || '';
+    const rawTracking = settings?.headerTrackingCode || '';
+    let extractedVerificationToken = '';
+
+    const tokenMatch = (rawVerification + ' ' + rawTracking).match(/content=["']([^"']+)["']/i);
+    if (tokenMatch) {
+      extractedVerificationToken = tokenMatch[1];
+    } else if (rawVerification.trim() && !rawVerification.includes('.html') && !rawVerification.includes(':')) {
+      extractedVerificationToken = rawVerification.trim();
+    }
+
+    if (extractedVerificationToken) {
+      updateMeta('google-site-verification', extractedVerificationToken);
     }
 
     // Dynamic Canonical URL

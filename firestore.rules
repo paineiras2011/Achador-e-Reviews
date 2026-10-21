@@ -22,35 +22,33 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Public readable reviews, admin manageable
+    // Public readable reviews, writable by app
     match /reviews/{reviewId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if true;
     }
 
-    // Public readable categories, admin manageable
+    // Public readable categories, writable by app
     match /categories/{categoryId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if true;
     }
 
-    // Public readable banners, admin manageable
+    // Public readable banners, writable by app
     match /banners/{bannerId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if true;
     }
 
-    // Public readable site settings, admin manageable
+    // Public readable site settings, writable by app
     match /siteSettings/{settingId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if true;
     }
 
     // Outbound affiliate click tracking
     match /affiliateClicks/{clickId} {
-      allow read: if isAdmin();
-      allow create: if isValidId(clickId) && request.resource.data.size() <= 10;
-      allow update, delete: if isAdmin();
+      allow read, write: if true;
     }
 
     // Admins list

@@ -438,5 +438,74 @@ export const StoreService = {
       totalClicks,
       recentClicks: clicks.slice(0, 50)
     };
+  },
+
+  // SINCRONIZAÇÃO EM MASSA & BACKUP
+  async syncAllToFirestore(): Promise<{ reviewsCount: number; categoriesCount: number; bannersCount: number }> {
+    const reviews = getLocal<Review[]>(STORAGE_KEYS.REVIEWS, INITIAL_REVIEWS);
+    const categories = getLocal<Category[]>(STORAGE_KEYS.CATEGORIES, INITIAL_CATEGORIES);
+    const banners = getLocal<Banner[]>(STORAGE_KEYS.BANNERS, INITIAL_BANNERS);
+    const settings = getLocal<SiteSettings>(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS);
+
+    for (const r of reviews) {
+      await setDoc(doc(db, 'reviews', r.id), r, { merge: true });
+    }
+    for (const c of categories) {
+      await setDoc(doc(db, 'categories', c.id), c, { merge: true });
+    }
+    for (const b of banners) {
+      await setDoc(doc(db, 'banners', b.id), b, { merge: true });
+    }
+    await setDoc(doc(db, 'siteSettings', 'global'), settings, { merge: true });
+
+    return {
+      reviewsCount: reviews.length,
+      categoriesCount: categories.length,
+      bannersCount: banners.length
+    };
+  },
+
+  exportBackup(): string {
+    const data = {
+      reviews: getLocal<Review[]>(STORAGE_KEYS.REVIEWS, INITIAL_REVIEWS),
+      categories: getLocal<Category[]>(STORAGE_KEYS.CATEGORIES, INITIAL_CATEGORIES),
+      banners: getLocal<Banner[]>(STORAGE_KEYS.BANNERS, INITIAL_BANNERS),
+      settings: getLocal<SiteSettings>(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS),
+      clicks: getLocal<AffiliateClick[]>(STORAGE_KEYS.CLICKS, []),
+      exportedAt: new Date().toISOString()
+    };
+    return JSON.stringify(data, null, 2);
+  },
+
+  async importBackup(jsonString: string): Promise<boolean> {
+    try {
+      const data = JSON.parse(jsonString);
+      if (data.reviews && Array.isArray(data.reviews)) {
+        setLocal(STORAGE_KEYS.REVIEWS, data.reviews);
+        for (const r of data.reviews) {
+          await setDoc(doc(db, 'reviews', r.id), r, { merge: true });
+        }
+      }
+      if (data.categories && Array.isArray(data.categories)) {
+        setLocal(STORAGE_KEYS.CATEGORIES, data.categories);
+        for (const c of data.categories) {
+          await setDoc(doc(db, 'categories', c.id), c, { merge: true });
+        }
+      }
+      if (data.banners && Array.isArray(data.banners)) {
+        setLocal(STORAGE_KEYS.BANNERS, data.banners);
+        for (const b of data.banners) {
+          await setDoc(doc(db, 'banners', b.id), b, { merge: true });
+        }
+      }
+      if (data.settings) {
+        setLocal(STORAGE_KEYS.SETTINGS, data.settings);
+        await setDoc(doc(db, 'siteSettings', 'global'), data.settings, { merge: true });
+      }
+      return true;
+    } catch (err) {
+      console.error('Import error:', err);
+      return false;
+    }
   }
 };
