@@ -1,0 +1,6 @@
+{
+  "name": "Achados & Reviews",
+  "description": "Portal autônomo de reviews detalhados, comparativos de produtos e curadoria com ofertas e links de afiliados verificados.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

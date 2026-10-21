@@ -1,0 +1,112 @@
+{
+  "entities": {
+    "Review": {
+      "title": "Review",
+      "description": "Product review and affiliate analysis article",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "slug": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "subtitle": { "type": "string", "maxLength": 300 },
+        "category": { "type": "string", "maxLength": 64 },
+        "coverImage": { "type": "string", "maxLength": 1000 },
+        "rating": { "type": "number" },
+        "priceCurrent": { "type": "string", "maxLength": 64 },
+        "priceOriginal": { "type": "string", "maxLength": 64 },
+        "affiliateUrl": { "type": "string", "maxLength": 1000 },
+        "partnerStore": { "type": "string", "maxLength": 64 },
+        "couponCode": { "type": "string", "maxLength": 64 },
+        "pros": { "type": "array" },
+        "cons": { "type": "array" },
+        "specifications": { "type": "array" },
+        "content": { "type": "string", "maxLength": 50000 },
+        "faqs": { "type": "array" },
+        "verdict": { "type": "string", "maxLength": 2000 },
+        "featured": { "type": "boolean" },
+        "viewsCount": { "type": "number" },
+        "clicksCount": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "slug", "title", "category", "rating", "affiliateUrl"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Category for classifying product reviews",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 100 },
+        "slug": { "type": "string", "maxLength": 100 },
+        "icon": { "type": "string", "maxLength": 64 },
+        "description": { "type": "string", "maxLength": 300 }
+      },
+      "required": ["id", "name", "slug"]
+    },
+    "Banner": {
+      "title": "Banner",
+      "description": "Affiliate advertising banner in dedicated slot",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "position": { "type": "string", "enum": ["header", "sidebar", "in_article"] },
+        "title": { "type": "string", "maxLength": 100 },
+        "imageUrl": { "type": "string", "maxLength": 1000 },
+        "targetUrl": { "type": "string", "maxLength": 1000 },
+        "altText": { "type": "string", "maxLength": 200 },
+        "active": { "type": "boolean" }
+      },
+      "required": ["id", "position", "targetUrl", "active"]
+    },
+    "SiteSettings": {
+      "title": "SiteSettings",
+      "description": "General settings and tracking codes for Achados & Reviews",
+      "type": "object",
+      "properties": {
+        "siteName": { "type": "string", "maxLength": 100 },
+        "tagline": { "type": "string", "maxLength": 200 },
+        "logoUrl": { "type": "string", "maxLength": 1000 },
+        "affiliateDisclosure": { "type": "string", "maxLength": 2000 },
+        "headerTrackingCode": { "type": "string", "maxLength": 5000 },
+        "contactEmail": { "type": "string", "maxLength": 128 },
+        "telegramUrl": { "type": "string", "maxLength": 500 },
+        "whatsappUrl": { "type": "string", "maxLength": 500 }
+      }
+    },
+    "AffiliateClick": {
+      "title": "AffiliateClick",
+      "description": "Track outbound click event on affiliate links",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "reviewId": { "type": "string", "maxLength": 128 },
+        "partnerStore": { "type": "string", "maxLength": 64 },
+        "timestamp": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "reviewId", "partnerStore"]
+    }
+  },
+  "firestore": {
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Public catalog of product reviews"
+    },
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Product categories"
+    },
+    "/banners/{bannerId}": {
+      "schema": "Banner",
+      "description": "Monetization and promotional banners"
+    },
+    "/siteSettings/{settingId}": {
+      "schema": "SiteSettings",
+      "description": "Global website configuration"
+    },
+    "/affiliateClicks/{clickId}": {
+      "schema": "AffiliateClick",
+      "description": "Click event logs for affiliate attribution"
+    }
+  }
+}
