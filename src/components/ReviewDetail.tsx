@@ -143,12 +143,15 @@ export const ReviewDetail: React.FC<ReviewDetailProps> = ({
               
               {/* Product Thumbnail */}
               <div className="md:col-span-4 lg:col-span-3">
-                <div className="aspect-4/3 rounded-lg overflow-hidden bg-slate-800 border border-slate-700">
+                <div className="aspect-4/3 rounded-lg overflow-hidden bg-white border border-slate-700 flex items-center justify-center p-2">
                   <img
                     src={review.coverImage}
                     alt={review.title}
                     referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src = '/src/assets/images/hero_tech_showcase_1792355762010.jpg';
+                    }}
+                    className="w-full h-full object-contain"
                   />
                 </div>
               </div>

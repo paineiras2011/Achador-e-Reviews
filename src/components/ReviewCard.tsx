@@ -25,7 +25,10 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({
             src={review.coverImage}
             alt={review.title}
             referrerPolicy="no-referrer"
-            className="w-full h-full object-cover group-hover:scale-104 transition-transform duration-300"
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).src = '/src/assets/images/hero_tech_showcase_1792355762010.jpg';
+            }}
+            className="w-full h-full object-contain p-2 bg-white group-hover:scale-104 transition-transform duration-300"
           />
           {review.discountPercent && (
             <div className="absolute top-3 left-3 bg-[#0B132B] text-[#00E5FF] text-2xs font-bold px-2 py-0.5 rounded font-mono border border-cyan-500/20">

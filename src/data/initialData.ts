@@ -40,6 +40,110 @@ export const INITIAL_CATEGORIES: Category[] = [
 
 export const INITIAL_REVIEWS: Review[] = [
   {
+    id: 'rev-1792627068945',
+    slug: 'celular-samsung-galaxy-s26-fe-128gb-8gb-ram-tela-6-7-azul-cobalto',
+    title: 'Celular Samsung Galaxy S26 FE 128GB, 8GB RAM Tela 6,7" - Azul cobalto',
+    subtitle: 'Análise completa de desempenho, câmera com IA, acabamento premium em metal e tela Dynamic AMOLED.',
+    category: 'Tecnologia & Dispositivos',
+    coverImage: 'https://http2.mlstatic.com/D_NQ_NP_895608-MLA117138199441_092026-O.webp',
+    rating: 5.0,
+    priceCurrent: 'R$ 3.599,10',
+    priceOriginal: 'R$ 5.499,00',
+    discountPercent: '35% de desconto',
+    affiliateUrl: 'https://meli.la/165Svx2',
+    partnerStore: 'Mercado Livre',
+    featured: true,
+    otherStores: [],
+    pros: [
+      'Design elegante com acabamento premium em metal e vidro reforçado',
+      'Câmera de flagship com gravação nivelada e recursos avançados de IA para fotos',
+      'Processador de última geração para jogos pesados com tela Dynamic AMOLED super fluida',
+      'Bateria de longa duração com carregamento rápido de alta eficiência'
+    ],
+    cons: [
+      'Manual de instruções poderia ser mais detalhado para usuários iniciantes',
+      'Carregador ultrarrápido vendido separadamente por padrão de sustentabilidade'
+    ],
+    specifications: [
+      { label: 'Tela', value: '6.7 polegadas Dynamic AMOLED 2X 120Hz' },
+      { label: 'Memória e Armazenamento', value: '128 GB de armazenamento interno e 8 GB de RAM' },
+      { label: 'Câmeras', value: 'Sensor principal de 50 MP com estabilização óptica e zoom avançado' },
+      { label: 'Conectividade', value: '5G, Wi-Fi 6E, Bluetooth 5.3 e NFC para pagamentos' },
+      { label: 'Garantia', value: '12 meses oficial com nota fiscal nacional' }
+    ],
+    content: `### Design e Construção Premium\n\nO Galaxy S26 FE une o design consagrado da linha S a um acabamento sofisticado em metal e vidro fosco. A pegada é firme e o tom Azul Cobalto se destaca pela elegância discreta.\n\n### Câmera de Alto Nível com IA\n\nO conjunto de câmeras entrega fotos com excelente nitidez e cores fiéis mesmo em cenários noturnos. O enquadramento automático e a estabilização horizontal garantem gravações sem tremidos.\n\n### Desempenho e Autonomia\n\nEquipado com chip veloz e 8GB de RAM, o aparelho responde instantaneamente a qualquer comando sem engasgos, oferecendo bateria para um dia inteiro de uso intenso.`,
+    verdict: 'Uma das melhores opções do mercado para quem busca desempenho de topo de linha com excelente relação custo-benefício.',
+    scoreBreakdown: {
+      costBenefit: 4.8,
+      performance: 4.9,
+      buildQuality: 4.9,
+      usability: 4.8
+    },
+    faqs: [
+      {
+        question: 'O aparelho possui garantia nacional no Brasil?',
+        answer: 'Sim, homologado pela Anatel e com garantia total de 12 meses direto pelo fabricante.'
+      }
+    ],
+    viewsCount: 420,
+    clicksCount: 38,
+    createdAt: '2026-10-22T00:01:53.139Z',
+    updatedAt: '2026-10-22T00:03:56.730Z'
+  },
+  {
+    id: 'rev-1792626480972',
+    slug: 'notebook-dell-dc15-i51334u-a50-15-6-fhd-i5-8gb-512gb-win-11',
+    title: 'Notebook Dell Dc15-i51334u-a50 15.6 Fhd I5 8gb 512gb Win 11',
+    subtitle: 'Processador Intel Core i5 de 13ª geração, tela Full HD de 120 Hz e SSD veloz de 512 GB para produtividade.',
+    category: 'Informática & Periféricos',
+    coverImage: 'https://http2.mlstatic.com/D_NQ_NP_602930-MLA111944189869_052026-O.webp',
+    rating: 4.9,
+    priceCurrent: 'R$ 4.052,97',
+    priceOriginal: 'R$ 5.524,00',
+    discountPercent: '27% de desconto',
+    affiliateUrl: 'https://meli.la/2v3pZSW',
+    partnerStore: 'Mercado Livre',
+    featured: false,
+    otherStores: [],
+    pros: [
+      'Processador Intel Core i5 de 13ª geração com velocidade de até 4.6 GHz e 8 GB DDR5',
+      'Tela de 15.6 polegadas Full HD com taxa de atualização de 120 Hz para máxima fluidez',
+      'Armazenamento SSD NVMe de 512 GB com inicialização instantânea do Windows 11',
+      'Chassi leve de apenas 1.63 kg fácil de transportar no dia a dia com portas USB-C e HDMI'
+    ],
+    cons: [
+      'Duração de bateria varia de acordo com o nível de brilho da tela e uso gráfico intenso',
+      'Teclado padrão ABNT2 não possui retroiluminação neste modelo específico'
+    ],
+    specifications: [
+      { label: 'Processador', value: 'Intel Core i5-1334U (até 4.6 GHz, 12 MB Cache)' },
+      { label: 'Memória RAM', value: '8 GB DDR5 (expansível)' },
+      { label: 'Armazenamento', value: 'SSD M.2 NVMe de 512 GB' },
+      { label: 'Tela', value: '15.6 polegadas Full HD (1920x1080) 120Hz antirreflexo' },
+      { label: 'Sistema Operacional', value: 'Windows 11 Home 64 bits em português' },
+      { label: 'Peso', value: '1.63 kg' },
+      { label: 'Garantia', value: '12 meses oficial Dell no Brasil' }
+    ],
+    content: `### Produtividade e Agilidade para Trabalho e Estudos\n\nO Dell Inspiron 15 traz uma combinação potente de processador de 13ª geração e memória DDR5, entregando rapidez no carregamento de planilhas pesadas, navegação com dezenas de abas e programas de edição.\n\n### Tela Fluida de 120Hz\n\nA tela Full HD antirreflexo com taxa de 120Hz é um diferencial notável nessa faixa de preço, reduzindo o cansaço visual e tornando qualquer rolagem muito suave.\n\n### Construção Confiável e Conectividade Completa\n\nO notebook inclui portas USB-C, USB-A tradicionais, HDMI para monitores externos e leitor de cartão SD, pronto para qualquer rotina de escritório.`,
+    verdict: 'Excelente notebook para trabalho, estudo e multitarefa diária com a confiabilidade da assistência técnica Dell.',
+    scoreBreakdown: {
+      costBenefit: 4.8,
+      performance: 4.7,
+      buildQuality: 4.9,
+      usability: 4.8
+    },
+    faqs: [
+      {
+        question: 'O notebook já vem com o Windows instalado?',
+        answer: 'Sim! Acompanha o Windows 11 Home original já configurado de fábrica em português.'
+      }
+    ],
+    viewsCount: 310,
+    clicksCount: 24,
+    createdAt: '2026-10-21T23:56:32.057Z',
+    updatedAt: '2026-10-21T23:56:32.057Z'
+  },
+  {
     id: 'rev-01',
     slug: 'teclado-mecanico-sem-fio-ergonomico',
     title: 'Teclado Mecânico Sem Fio com Conexão Tripla: O Melhor para Produtividade e Digitação',
