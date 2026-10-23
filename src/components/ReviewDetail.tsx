@@ -16,31 +16,45 @@ import {
   Tag, 
   Award, 
   Sparkles,
+  Trophy,
+  Layers,
   ShoppingBag
 } from 'lucide-react';
-import { Review, Banner } from '../types';
+import { Review, Banner, ComparisonGuide } from '../types';
 import { AdBannerSlot } from './AdBannerSlot';
 import { cleanOtherStores } from '../utils/storeHelpers';
 
 interface ReviewDetailProps {
   review: Review;
   relatedReviews: Review[];
+  relatedGuides?: ComparisonGuide[];
   banners: Banner[];
   onBack: () => void;
   onReadReview: (slug: string) => void;
+  onSelectGuide?: (slug: string) => void;
   onAffiliateClick: (review: Review, storeName?: string) => void;
 }
 
 export const ReviewDetail: React.FC<ReviewDetailProps> = ({
   review,
   relatedReviews,
+  relatedGuides = [],
   banners,
   onBack,
   onReadReview,
+  onSelectGuide,
   onAffiliateClick
 }) => {
   const [openFaqIndices, setOpenFaqIndices] = useState<number[]>([0]); // Open first FAQ by default
   const [shareSuccess, setShareSuccess] = useState(false);
+
+  // Encontra guia comparativo que mencione explicitamente este produto ou pertença à mesma categoria
+  const matchingGuide = relatedGuides.find(g => 
+    g.published && (
+      g.products?.some(p => p.reviewSlug === review.slug || p.reviewSlug === review.id || p.title.toLowerCase().includes(review.title.toLowerCase().slice(0, 20))) ||
+      g.category === review.category
+    )
+  );
 
   const handleToggleFaq = (index: number) => {
     if (openFaqIndices.includes(index)) {
@@ -149,7 +163,10 @@ export const ReviewDetail: React.FC<ReviewDetailProps> = ({
                     alt={review.title}
                     referrerPolicy="no-referrer"
                     onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).src = '/src/assets/images/hero_tech_showcase_1792355762010.jpg';
+                      const img = e.currentTarget as HTMLImageElement;
+                      if (img.src && img.src.includes('.webp') && img.src.includes('mlstatic.com')) {
+                        img.src = img.src.replace('.webp', '.jpg');
+                      }
                     }}
                     className="w-full h-full object-contain"
                   />
@@ -386,6 +403,52 @@ export const ReviewDetail: React.FC<ReviewDetailProps> = ({
                 </a>
               </div>
             </section>
+
+            {/* GUIA COMPARATIVO RELACIONADO (Navegação Bidirecional) */}
+            {matchingGuide && onSelectGuide && (
+              <section className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-6 sm:p-8 text-white shadow-lg relative overflow-hidden border border-emerald-500/30">
+                <div className="relative z-10 space-y-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-3 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-xs font-bold rounded-full uppercase tracking-wider flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-emerald-400" />
+                      Guia Comparativo Relacionado
+                    </span>
+                    <span className="text-xs text-slate-300 font-medium bg-white/10 px-2.5 py-0.5 rounded-full">
+                      {matchingGuide.products?.length || 0} Modelos Analisados
+                    </span>
+                  </div>
+
+                  <h3 className="text-xl sm:text-2xl font-black text-white leading-tight">
+                    {matchingGuide.title}
+                  </h3>
+
+                  <p className="text-slate-300 text-xs sm:text-sm leading-relaxed max-w-2xl">
+                    Quer comparar este produto com outras opções do mercado? Confira nossa tabela comparativa com ranking de custo-benefício e prós e contras de cada modelo alternativo.
+                  </p>
+
+                  <div className="pt-2 flex flex-wrap items-center gap-3">
+                    <button
+                      onClick={() => onSelectGuide(matchingGuide.slug)}
+                      className="inline-flex items-center gap-2 px-5 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs sm:text-sm rounded-xl transition-all shadow-md cursor-pointer hover:shadow-emerald-500/20"
+                    >
+                      <Trophy className="w-4 h-4 text-slate-950" />
+                      <span>Ver Ranking e Comparativo Completo</span>
+                      <ExternalLink className="w-4 h-4" />
+                    </button>
+                    
+                    <a
+                      href={review.affiliateUrl}
+                      target="_blank"
+                      rel="sponsored nofollow noopener noreferrer"
+                      onClick={() => onAffiliateClick(review, review.partnerStore)}
+                      className="inline-flex items-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 text-white font-bold text-xs sm:text-sm rounded-xl transition-colors cursor-pointer"
+                    >
+                      <span>Comprar Este Modelo ({review.partnerStore})</span>
+                    </a>
+                  </div>
+                </div>
+              </section>
+            )}
 
             {/* FREQUENTLY ASKED QUESTIONS (FAQ with Schema markup) */}
             {review.faqs && review.faqs.length > 0 && (

@@ -18,9 +18,11 @@ import {
   CheckCircle2,
   AlertTriangle,
   Trophy,
-  ShoppingBag
+  ShoppingBag,
+  Award,
+  BookOpen
 } from 'lucide-react';
-import { Review, Category, Banner, SiteSettings, AffiliateClick } from '../../types';
+import { Review, Category, Banner, SiteSettings, AffiliateClick, ComparisonGuide } from '../../types';
 import { BannerManager } from './BannerManager';
 import { CategoryManager } from './CategoryManager';
 import { SiteSettingsManager } from './SiteSettingsManager';
@@ -28,11 +30,13 @@ import { SiteSettingsManager } from './SiteSettingsManager';
 interface AdminDashboardProps {
   adminEmail: string;
   reviews: Review[];
+  guides: ComparisonGuide[];
   categories: Category[];
   banners: Banner[];
   settings: SiteSettings;
   stats: {
     totalReviews: number;
+    totalGuides?: number;
     totalCategories: number;
     totalBanners: number;
     totalViews: number;
@@ -43,6 +47,10 @@ interface AdminDashboardProps {
   onEditReview: (review: Review) => void;
   onDeleteReview: (id: string) => void;
   onViewReview: (slug: string) => void;
+  onOpenCreateGuide: () => void;
+  onEditGuide: (guide: ComparisonGuide) => void;
+  onDeleteGuide: (id: string) => void;
+  onViewGuide: (slug: string) => void;
   onSaveCategory: (category: Category) => void;
   onDeleteCategory: (id: string) => void;
   onSaveBanner: (banner: Banner) => void;
@@ -54,6 +62,7 @@ interface AdminDashboardProps {
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   adminEmail,
   reviews,
+  guides = [],
   categories,
   banners,
   settings,
@@ -62,6 +71,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onEditReview,
   onDeleteReview,
   onViewReview,
+  onOpenCreateGuide,
+  onEditGuide,
+  onDeleteGuide,
+  onViewGuide,
   onSaveCategory,
   onDeleteCategory,
   onSaveBanner,
@@ -69,15 +82,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onLogout,
   onExitToSite
 }) => {
-  const [activeTab, setActiveTab] = useState<'reviews' | 'categories' | 'banners' | 'settings' | 'clicks'>('reviews');
+  const [activeTab, setActiveTab] = useState<'reviews' | 'guides' | 'categories' | 'banners' | 'settings' | 'clicks'>('reviews');
   const [searchTerm, setSearchTerm] = useState('');
+  const [guideSearchTerm, setGuideSearchTerm] = useState('');
   const [reviewToDelete, setReviewToDelete] = useState<Review | null>(null);
+  const [guideToDelete, setGuideToDelete] = useState<ComparisonGuide | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
   const filteredReviews = reviews.filter(r => 
     r.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
     r.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
     r.partnerStore.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const filteredGuides = (guides || []).filter(g =>
+    g.title.toLowerCase().includes(guideSearchTerm.toLowerCase()) ||
+    g.category.toLowerCase().includes(guideSearchTerm.toLowerCase()) ||
+    g.products?.some(p => p.title.toLowerCase().includes(guideSearchTerm.toLowerCase()))
   );
 
   return (
@@ -118,17 +139,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
         
         {/* Painel de Indicadores (Métricas) */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 mb-8">
           
           <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
             <div className="flex items-center justify-between text-slate-500 mb-2">
-              <span className="text-xs font-semibold">Avaliações Publicadas</span>
+              <span className="text-xs font-semibold">Avaliações</span>
               <FileText className="w-4 h-4 text-cyan-600" />
             </div>
             <div className="text-2xl font-bold font-mono tabular-nums text-slate-900">
               {stats.totalReviews}
             </div>
-            <div className="text-3xs text-emerald-600 font-medium mt-1">Gestão autônoma ativa</div>
+            <div className="text-3xs text-emerald-600 font-medium mt-1">Produtos únicos</div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
+            <div className="flex items-center justify-between text-slate-500 mb-2">
+              <span className="text-xs font-semibold">Guias &amp; Comparativos</span>
+              <Award className="w-4 h-4 text-amber-500" />
+            </div>
+            <div className="text-2xl font-bold font-mono tabular-nums text-slate-900">
+              {guides.length}
+            </div>
+            <div className="text-3xs text-amber-600 font-medium mt-1">Artigos multi-produtos</div>
           </div>
 
           <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
@@ -170,7 +202,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <div className="flex items-center gap-2 border-b border-slate-200 pb-3 mb-6 overflow-x-auto text-xs font-bold">
           <button
             onClick={() => setActiveTab('reviews')}
-            className={`py-2 px-4 rounded-lg transition-all flex items-center gap-2 whitespace-nowrap ${
+            className={`py-2 px-4 rounded-lg transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeTab === 'reviews'
                 ? 'bg-[#0B132B] text-white shadow-xs'
                 : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
@@ -181,8 +213,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveTab('guides')}
+            className={`py-2 px-4 rounded-lg transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+              activeTab === 'guides'
+                ? 'bg-[#0B132B] text-white shadow-xs'
+                : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
+            }`}
+          >
+            <Award className="w-3.5 h-3.5 text-amber-400" />
+            <span>Guias &amp; Comparativos ({guides.length})</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('categories')}
-            className={`py-2 px-4 rounded-lg transition-all flex items-center gap-2 whitespace-nowrap ${
+            className={`py-2 px-4 rounded-lg transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeTab === 'categories'
                 ? 'bg-[#0B132B] text-white shadow-xs'
                 : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
@@ -194,7 +238,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           <button
             onClick={() => setActiveTab('banners')}
-            className={`py-2 px-4 rounded-lg transition-all flex items-center gap-2 whitespace-nowrap ${
+            className={`py-2 px-4 rounded-lg transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeTab === 'banners'
                 ? 'bg-[#0B132B] text-white shadow-xs'
                 : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
@@ -206,7 +250,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           <button
             onClick={() => setActiveTab('clicks')}
-            className={`py-2 px-4 rounded-lg transition-all flex items-center gap-2 whitespace-nowrap ${
+            className={`py-2 px-4 rounded-lg transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeTab === 'clicks'
                 ? 'bg-[#0B132B] text-white shadow-xs'
                 : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
@@ -218,7 +262,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           <button
             onClick={() => setActiveTab('settings')}
-            className={`py-2 px-4 rounded-lg transition-all flex items-center gap-2 whitespace-nowrap ${
+            className={`py-2 px-4 rounded-lg transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeTab === 'settings'
                 ? 'bg-[#0B132B] text-white shadow-xs'
                 : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
@@ -404,6 +448,178 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors shadow-sm"
                     >
                       Sim, Excluir Avaliação
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ABA: GUIAS & COMPARATIVOS */}
+        {activeTab === 'guides' && (
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <input
+                type="text"
+                placeholder="Filtrar comparativo por título, categoria ou produto..."
+                value={guideSearchTerm}
+                onChange={(e) => setGuideSearchTerm(e.target.value)}
+                className="w-full sm:max-w-md px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 shadow-2xs"
+              />
+
+              <button
+                onClick={onOpenCreateGuide}
+                className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-colors shadow-xs hover:shadow cursor-pointer shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Criar Novo Guia Comparativo</span>
+              </button>
+            </div>
+
+            {/* Tabela de Guias */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-600 uppercase tracking-wider text-3xs border-b border-slate-200">
+                    <tr>
+                      <th className="py-3 px-4">Comparativo / Título</th>
+                      <th className="py-3 px-4">Categoria</th>
+                      <th className="py-3 px-4 text-center">Modelos Analisados</th>
+                      <th className="py-3 px-4 text-center">Visualizações</th>
+                      <th className="py-3 px-4 text-center">Status</th>
+                      <th className="py-3 px-4 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredGuides.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center text-slate-400">
+                          {guideSearchTerm
+                            ? 'Nenhum guia comparativo encontrado para este filtro.'
+                            : 'Nenhum guia comparativo cadastrado. Clique no botão acima para criar o primeiro!'}
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredGuides.map((g) => (
+                        <tr key={g.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-3.5 px-4">
+                            <div className="flex items-center gap-3">
+                              <img
+                                src={g.coverImage || g.products?.[0]?.imageUrl || 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=200&q=80'}
+                                alt={g.title}
+                                className="w-12 h-10 rounded-lg object-cover bg-slate-100 border border-slate-200 shrink-0"
+                              />
+                              <div className="min-w-0 max-w-md">
+                                <div className="font-bold text-slate-900 line-clamp-1">{g.title}</div>
+                                <div className="text-3xs text-slate-500 font-mono line-clamp-1 mt-0.5">
+                                  /guias/{g.slug}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-md text-3xs font-semibold">
+                              {g.category}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                            <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200/60 rounded-md text-3xs font-bold">
+                              {g.products?.length || 0} produtos no pódio
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-center font-mono font-medium text-slate-700 whitespace-nowrap">
+                            {(g.viewsCount || 0).toLocaleString('pt-BR')}
+                          </td>
+                          <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                            <div className="flex flex-col items-center gap-1">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-3xs font-bold ${
+                                  g.published
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-amber-100 text-amber-800'
+                                }`}
+                              >
+                                {g.published ? 'Publicado' : 'Rascunho'}
+                              </span>
+                              {g.featured && (
+                                <span className="text-3xs text-amber-600 font-semibold flex items-center gap-0.5">
+                                  <Sparkles className="w-2.5 h-2.5" /> Destaque
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => onViewGuide(g.slug)}
+                                className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                                title="Ver página do comparativo no site"
+                              >
+                                <ExternalLink className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => onEditGuide(g)}
+                                className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                                title="Editar guia comparativo"
+                              >
+                                <Edit3 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => setGuideToDelete(g)}
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                title="Excluir guia comparativo"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Modal de Confirmação de Exclusão de Guia */}
+            {guideToDelete && (
+              <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-2xs flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                      <AlertTriangle className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-base">Excluir Guia Comparativo?</h3>
+                      <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                        Tem certeza que deseja excluir o guia <strong>"{guideToDelete.title}"</strong>?
+                        Essa ação removerá o comparativo e a tabela de recomendações do site.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setGuideToDelete(null)}
+                      className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetId = guideToDelete.id;
+                        const targetTitle = guideToDelete.title;
+                        setGuideToDelete(null);
+                        onDeleteGuide(targetId);
+                        setFeedbackMessage(`Guia "${targetTitle}" excluído com sucesso!`);
+                        setTimeout(() => setFeedbackMessage(null), 3500);
+                      }}
+                      className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors shadow-sm cursor-pointer"
+                    >
+                      Sim, Excluir Guia
                     </button>
                   </div>
                 </div>

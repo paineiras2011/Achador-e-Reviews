@@ -9,25 +9,30 @@ import { Hero } from './components/Hero';
 import { CategoryFilter } from './components/CategoryFilter';
 import { ReviewCard } from './components/ReviewCard';
 import { ReviewDetail } from './components/ReviewDetail';
+import { GuideCard } from './components/GuideCard';
+import { GuideDetail } from './components/GuideDetail';
 import { AdBannerSlot } from './components/AdBannerSlot';
 import { Footer } from './components/Footer';
 import { SeoHead } from './components/SeoHead';
 import { AdminLoginModal } from './components/admin/AdminLoginModal';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { ReviewEditorModal } from './components/admin/ReviewEditorModal';
+import { GuideEditorModal } from './components/admin/GuideEditorModal';
 import { StoreService } from './services/store';
-import { Review, Category, Banner, SiteSettings, AffiliateClick } from './types';
-import { INITIAL_REVIEWS, INITIAL_CATEGORIES, INITIAL_BANNERS, INITIAL_SETTINGS } from './data/initialData';
+import { Review, Category, Banner, SiteSettings, AffiliateClick, ComparisonGuide } from './types';
+import { INITIAL_REVIEWS, INITIAL_CATEGORIES, INITIAL_BANNERS, INITIAL_SETTINGS, INITIAL_GUIDES } from './data/initialData';
 import { testFirestoreConnection } from './lib/firebase';
-import { Sparkles, ShieldCheck, LogOut } from 'lucide-react';
+import { Sparkles, ShieldCheck, LogOut, Layers, Award } from 'lucide-react';
 
 export default function App() {
   const [reviews, setReviews] = useState<Review[]>(INITIAL_REVIEWS);
+  const [guides, setGuides] = useState<ComparisonGuide[]>(INITIAL_GUIDES);
   const [categories, setCategories] = useState<Category[]>(INITIAL_CATEGORIES);
   const [banners, setBanners] = useState<Banner[]>(INITIAL_BANNERS);
   const [settings, setSettings] = useState<SiteSettings>(INITIAL_SETTINGS);
   const [stats, setStats] = useState({
     totalReviews: INITIAL_REVIEWS.length,
+    totalGuides: INITIAL_GUIDES.length,
     totalCategories: INITIAL_CATEGORIES.length,
     totalBanners: INITIAL_BANNERS.length,
     totalViews: 10430,
@@ -35,8 +40,9 @@ export default function App() {
     recentClicks: [] as AffiliateClick[]
   });
 
-  const [currentView, setCurrentView] = useState<'home' | 'review' | 'admin'>('home');
+  const [currentView, setCurrentView] = useState<'home' | 'review' | 'guide' | 'admin'>('home');
   const [currentReviewSlug, setCurrentReviewSlug] = useState<string | null>(null);
+  const [currentGuideSlug, setCurrentGuideSlug] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -46,13 +52,16 @@ export default function App() {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isReviewEditorModalOpen, setIsReviewEditorModalOpen] = useState(false);
   const [reviewToEdit, setReviewToEdit] = useState<Review | null>(null);
+  const [isGuideEditorModalOpen, setIsGuideEditorModalOpen] = useState(false);
+  const [guideToEdit, setGuideToEdit] = useState<ComparisonGuide | null>(null);
 
   // Initial Data Loading & Firestore synchronization
   const loadData = useCallback(async () => {
     try {
       await StoreService.initialize();
-      const [revs, cats, bans, sets, currentStats] = await Promise.all([
+      const [revs, guis, cats, bans, sets, currentStats] = await Promise.all([
         StoreService.getReviews(),
+        StoreService.getGuides(),
         StoreService.getCategories(),
         StoreService.getBanners(),
         StoreService.getSettings(),
@@ -60,6 +69,7 @@ export default function App() {
       ]);
 
       if (revs) setReviews(revs);
+      if (guis && guis.length > 0) setGuides(guis);
       if (cats && cats.length > 0) setCategories(cats);
       if (bans && bans.length > 0) setBanners(bans);
       if (sets) setSettings(sets);
@@ -73,13 +83,19 @@ export default function App() {
     testFirestoreConnection();
     loadData();
 
-    // Roteamento dinâmico por URL (ex: /reviews/slug ou /admin)
+    // Roteamento dinâmico por URL (ex: /reviews/slug, /guias/slug ou /admin)
     const path = window.location.pathname;
     if (path.startsWith('/reviews/')) {
       const slug = path.replace('/reviews/', '');
       if (slug) {
         setCurrentReviewSlug(slug);
         setCurrentView('review');
+      }
+    } else if (path.startsWith('/guias/')) {
+      const slug = path.replace('/guias/', '');
+      if (slug) {
+        setCurrentGuideSlug(slug);
+        setCurrentView('guide');
       }
     } else if (path === '/admin') {
       setCurrentView('admin');
@@ -95,11 +111,16 @@ export default function App() {
         const slug = currentPath.replace('/reviews/', '');
         setCurrentReviewSlug(slug);
         setCurrentView('review');
+      } else if (currentPath.startsWith('/guias/')) {
+        const slug = currentPath.replace('/guias/', '');
+        setCurrentGuideSlug(slug);
+        setCurrentView('guide');
       } else if (currentPath === '/admin') {
         setCurrentView('admin');
       } else {
         setCurrentView('home');
         setCurrentReviewSlug(null);
+        setCurrentGuideSlug(null);
       }
     };
 
@@ -124,10 +145,38 @@ export default function App() {
   const handleGoHome = () => {
     setCurrentView('home');
     setCurrentReviewSlug(null);
+    setCurrentGuideSlug(null);
     setSelectedCategory('all');
     setSearchQuery('');
     window.history.pushState({}, '', '/');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleSelectGuide = (slug: string) => {
+    const target = guides.find(g => g.slug === slug || g.id === slug);
+    if (target) {
+      StoreService.incrementGuideViews(target.id);
+      setGuides(prev => prev.map(g => g.id === target.id ? { ...g, viewsCount: (g.viewsCount || 0) + 1 } : g));
+    }
+    setCurrentGuideSlug(slug);
+    setCurrentView('guide');
+    window.history.pushState({}, '', `/guias/${slug}`);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleGoGuidesSection = () => {
+    if (currentView !== 'home') {
+      setCurrentView('home');
+      setCurrentReviewSlug(null);
+      setCurrentGuideSlug(null);
+      window.history.pushState({}, '', '/');
+    }
+    setTimeout(() => {
+      const el = document.getElementById('guias-comparativos');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth' });
+      }
+    }, 100);
   };
 
   const handleSelectCategory = (categoryName: string) => {
@@ -135,6 +184,7 @@ export default function App() {
     if (currentView !== 'home') {
       setCurrentView('home');
       setCurrentReviewSlug(null);
+      setCurrentGuideSlug(null);
       window.history.pushState({}, '', '/');
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -225,6 +275,24 @@ export default function App() {
     }
   };
 
+  // CRUD de Guias Comparativos
+  const handleSaveGuide = async (guide: ComparisonGuide) => {
+    await StoreService.saveGuide(guide);
+    await loadData();
+    if (currentGuideSlug === guide.id || currentGuideSlug === guide.slug) {
+      setCurrentGuideSlug(guide.slug);
+    }
+  };
+
+  const handleDeleteGuide = async (id: string) => {
+    setGuides(prev => prev.filter(g => g.id !== id && g.slug !== id));
+    await StoreService.deleteGuide(id);
+    await loadData();
+    if (currentGuideSlug === id) {
+      handleGoHome();
+    }
+  };
+
   // CRUD de Categorias (Pedido pelo Usuário)
   const handleSaveCategory = async (category: Category) => {
     await StoreService.saveCategory(category);
@@ -258,12 +326,30 @@ export default function App() {
     return matchesCategory && matchesSearch;
   });
 
+  // Filtro de guias comparativos por categoria e busca
+  const filteredGuides = guides.filter((g) => {
+    if (!g.published && !isAdminLoggedIn) return false;
+    const matchesCategory = selectedCategory === 'all' || !selectedCategory || g.category === selectedCategory;
+    const matchesSearch = !searchQuery.trim() ||
+      g.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      g.subtitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      g.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      g.products?.some(p => p.title.toLowerCase().includes(searchQuery.toLowerCase()));
+
+    return matchesCategory && matchesSearch;
+  });
+
   const featuredReviews = reviews.filter(r => r.featured).length > 0 
     ? reviews.filter(r => r.featured) 
     : reviews.slice(0, 5);
   const featuredReview = featuredReviews[0] || reviews[0];
+
   const activeReview = currentReviewSlug
     ? reviews.find(r => r.slug === currentReviewSlug || r.id === currentReviewSlug) || null
+    : null;
+
+  const activeGuide = currentGuideSlug
+    ? guides.find(g => g.slug === currentGuideSlug || g.id === currentGuideSlug) || null
     : null;
 
   const relatedReviews = activeReview
@@ -275,19 +361,21 @@ export default function App() {
       
       {/* Meta Tags Dinâmicas e Schema.org JSON-LD para o Google */}
       <SeoHead
-        title={activeReview ? activeReview.title : undefined}
-        description={activeReview ? activeReview.subtitle : undefined}
+        title={activeReview ? activeReview.title : activeGuide ? activeGuide.title : undefined}
+        description={activeReview ? activeReview.subtitle : activeGuide ? (activeGuide.subtitle || activeGuide.introContent.slice(0, 160)) : undefined}
         review={activeReview}
         settings={settings}
       />
 
-      {/* Barra de Navegação Pública (Sem botão visível de admin para visitantes) */}
+      {/* Barra de Navegação Pública */}
       <Navbar
         categories={categories}
         onGoHome={handleGoHome}
+        onGoGuides={handleGoGuidesSection}
         onSelectCategory={handleSelectCategory}
         onOpenAdmin={handleOpenAdmin}
         activeCategory={selectedCategory}
+        isGuidesActive={currentView === 'guide'}
         isAdminLoggedIn={isAdminLoggedIn}
       />
 
@@ -297,6 +385,7 @@ export default function App() {
           <AdminDashboard
             adminEmail={adminEmail}
             reviews={reviews}
+            guides={guides}
             categories={categories}
             banners={banners}
             settings={settings}
@@ -311,6 +400,16 @@ export default function App() {
             }}
             onDeleteReview={handleDeleteReview}
             onViewReview={handleReadReview}
+            onOpenCreateGuide={() => {
+              setGuideToEdit(null);
+              setIsGuideEditorModalOpen(true);
+            }}
+            onEditGuide={(g) => {
+              setGuideToEdit(g);
+              setIsGuideEditorModalOpen(true);
+            }}
+            onDeleteGuide={handleDeleteGuide}
+            onViewGuide={handleSelectGuide}
             onSaveCategory={handleSaveCategory}
             onDeleteCategory={handleDeleteCategory}
             onSaveBanner={handleSaveBanner}
@@ -328,22 +427,33 @@ export default function App() {
               </p>
               <button
                 onClick={() => setIsLoginModalOpen(true)}
-                className="px-5 py-2.5 bg-[#FF6B00] hover:bg-[#e05e00] text-white text-xs font-bold rounded-lg shadow-sm transition-colors"
+                className="px-5 py-2.5 bg-[#FF6B00] hover:bg-[#e05e00] text-white text-xs font-bold rounded-lg shadow-sm transition-colors cursor-pointer"
               >
                 Digitar Senha de Acesso
               </button>
             </div>
           </div>
         )
+      ) : currentView === 'guide' && activeGuide ? (
+        /* VISÃO: PÁGINA DE GUIA COMPARATIVO (Artigo Multi-Produtos) */
+        <main className="flex-1">
+          <GuideDetail
+            guide={activeGuide}
+            onBack={handleGoHome}
+            onSelectReview={handleReadReview}
+          />
+        </main>
       ) : currentView === 'review' && activeReview ? (
-        /* VISÃO: PÁGINA DE ANÁLISE DETALHADA (Artigo de Vendas) */
+        /* VISÃO: PÁGINA DE ANÁLISE DETALHADA (Artigo Individual com link para Comparativo) */
         <main className="flex-1">
           <ReviewDetail
             review={activeReview}
             relatedReviews={relatedReviews}
+            relatedGuides={guides}
             banners={banners}
             onBack={handleGoHome}
             onReadReview={handleReadReview}
+            onSelectGuide={handleSelectGuide}
             onAffiliateClick={handleAffiliateClick}
           />
         </main>
@@ -363,6 +473,59 @@ export default function App() {
           />
 
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+            {/* Seção de Guias Comparativos & Artigos */}
+            {filteredGuides.length > 0 && (
+              <section id="guias-comparativos" className="mb-14 scroll-mt-20">
+                <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mb-6 border-b border-slate-200/80 pb-4">
+                  <div>
+                    <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-600 mb-1">
+                      <Layers className="w-4 h-4" />
+                      <span>Análises Comparativas &amp; Rankings</span>
+                    </div>
+                    <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+                      Guias de Compra &amp; Comparativos
+                    </h2>
+                    <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                      Comparações completas com pódio dos melhores modelos, especificações reais e links de afiliados oficiais.
+                    </p>
+                  </div>
+                  {isAdminLoggedIn && (
+                    <button
+                      onClick={() => {
+                        setGuideToEdit(null);
+                        setIsGuideEditorModalOpen(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer self-start sm:self-auto shrink-0 shadow-xs"
+                    >
+                      + Novo Comparativo
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8">
+                  {filteredGuides.map((guide) => (
+                    <GuideCard
+                      key={guide.id}
+                      guide={guide}
+                      onSelect={handleSelectGuide}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Cabeçalho da Seção de Avaliações Individuais */}
+            <div className="border-b border-slate-200 pb-3 mb-6 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                  Avaliações Individuais Recentes
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Análises aprofundadas com notas técnicas, prós e contras e melhor preço do dia
+                </p>
+              </div>
+            </div>
+
             {/* Filtro de Categorias 100% Funcional e Busca Instantânea */}
             <CategoryFilter
               categories={categories}
@@ -430,14 +593,14 @@ export default function App() {
               setCurrentView('admin');
               window.history.pushState({}, '', '/admin');
             }}
-            className="py-1 px-2.5 bg-cyan-500 text-slate-900 font-bold rounded hover:bg-cyan-400 transition-colors"
+            className="py-1 px-2.5 bg-cyan-500 text-slate-900 font-bold rounded hover:bg-cyan-400 transition-colors cursor-pointer"
           >
             Abrir Painel
           </button>
           <button
             onClick={handleLogout}
             title="Sair da Sessão"
-            className="text-slate-400 hover:text-rose-400 transition-colors p-1"
+            className="text-slate-400 hover:text-rose-400 transition-colors p-1 cursor-pointer"
           >
             <LogOut className="w-3.5 h-3.5" />
           </button>
@@ -461,6 +624,17 @@ export default function App() {
         onDelete={handleDeleteReview}
       />
 
+      {/* Modal de Criação / Edição de Guias Comparativos */}
+      <GuideEditorModal
+        isOpen={isGuideEditorModalOpen}
+        guide={guideToEdit}
+        categories={categories}
+        existingReviews={reviews}
+        onClose={() => setIsGuideEditorModalOpen(false)}
+        onSave={handleSaveGuide}
+      />
+
     </div>
   );
 }
+

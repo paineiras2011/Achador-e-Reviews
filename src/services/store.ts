@@ -11,12 +11,13 @@ import {
   updateDoc
 } from 'firebase/firestore';
 import { db, auth, OperationType, handleFirestoreError } from '../lib/firebase';
-import { Review, Category, Banner, SiteSettings, AffiliateClick } from '../types';
+import { Review, Category, Banner, SiteSettings, AffiliateClick, ComparisonGuide } from '../types';
 import { 
   INITIAL_REVIEWS, 
   INITIAL_CATEGORIES, 
   INITIAL_BANNERS, 
-  INITIAL_SETTINGS 
+  INITIAL_SETTINGS,
+  INITIAL_GUIDES
 } from '../data/initialData';
 import { cleanOtherStores } from '../utils/storeHelpers';
 
@@ -26,6 +27,7 @@ const STORAGE_KEYS = {
   BANNERS: 'achados_banners_data',
   SETTINGS: 'achados_settings_data',
   CLICKS: 'achados_affiliate_clicks_data',
+  GUIDES: 'achados_guides_data',
   SEEDED: 'achados_firestore_seeded'
 };
 
@@ -51,10 +53,27 @@ function setLocal<T>(key: string, val: T): void {
 export const StoreService = {
   // Initialize seed data in Firestore and local storage if needed
   async initialize(): Promise<void> {
-    // 1. Preservação Total: Nunca sobrescreve dados já existentes salvos pelo usuário
+    // 1. Preservação Total e Limpeza de Cache Antigo:
     const existingReviews = getLocal<Review[] | null>(STORAGE_KEYS.REVIEWS, null);
     if (!existingReviews || existingReviews.length === 0) {
       setLocal(STORAGE_KEYS.REVIEWS, INITIAL_REVIEWS);
+    } else {
+      // Limpa do cache do navegador qualquer imagem genérica residual para produtos que possuem foto real
+      const initialMap = new Map(INITIAL_REVIEWS.map(r => [r.id, r]));
+      let hasUpdates = false;
+      const sanitized = existingReviews.map(rev => {
+        const init = initialMap.get(rev.id) || INITIAL_REVIEWS.find(r => r.slug === rev.slug);
+        if (init && init.coverImage && init.coverImage.startsWith('http')) {
+          if (!rev.coverImage || rev.coverImage.includes('hero_tech_showcase') || rev.coverImage.startsWith('/src/assets/')) {
+            hasUpdates = true;
+            return { ...rev, coverImage: init.coverImage };
+          }
+        }
+        return rev;
+      });
+      if (hasUpdates) {
+        setLocal(STORAGE_KEYS.REVIEWS, sanitized);
+      }
     }
 
     const existingCategories = getLocal<Category[] | null>(STORAGE_KEYS.CATEGORIES, null);
@@ -70,6 +89,11 @@ export const StoreService = {
     const existingSettings = getLocal<SiteSettings | null>(STORAGE_KEYS.SETTINGS, null);
     if (!existingSettings) {
       setLocal(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS);
+    }
+
+    const existingGuides = getLocal<ComparisonGuide[] | null>(STORAGE_KEYS.GUIDES, null);
+    if (!existingGuides || existingGuides.length === 0) {
+      setLocal(STORAGE_KEYS.GUIDES, INITIAL_GUIDES);
     }
 
     // 2. Seeding no Firestore: somente executa escrita remota se o admin estiver logado
@@ -98,6 +122,13 @@ export const StoreService = {
               await setDoc(docRef, ban);
             }
           }
+          for (const gui of INITIAL_GUIDES) {
+            const docRef = doc(db, 'guides', gui.id);
+            const snap = await getDoc(docRef);
+            if (!snap.exists()) {
+              await setDoc(docRef, gui);
+            }
+          }
           const settingsRef = doc(db, 'siteSettings', 'global');
           const settingsSnap = await getDoc(settingsRef);
           if (!settingsSnap.exists()) {
@@ -108,7 +139,6 @@ export const StoreService = {
           // Seeding remoto postergado
         }
       } else {
-        // Dados locais já inicializados com segurança para visitantes
         localStorage.setItem(STORAGE_KEYS.SEEDED, 'true');
       }
     }
@@ -143,30 +173,50 @@ export const StoreService = {
             otherStores: cleanOtherStores(r.otherStores, r.partnerStore, r.affiliateUrl)
           }));
 
-        // Fusão inteligente bidirecional: NUNCA perde itens cadastrados localmente
+        // Fusão com autoridade prioritária do Firestore
         const mergedMap = new Map<string, Review>();
 
-        // 1. Registra os locais atuais (contém produtos cadastrados e edições do usuário)
-        for (const loc of local) {
-          if (loc && loc.id && !deletedList.includes(loc.id) && !deletedList.includes(loc.slug)) {
-            mergedMap.set(loc.id, loc);
+        // 1. Registra os remotos vindos do Firestore como base de verdade
+        for (const rem of remoteReviews) {
+          if (rem && rem.id && !deletedList.includes(rem.id) && !deletedList.includes(rem.slug)) {
+            mergedMap.set(rem.id, rem);
           }
         }
 
-        // 2. Mescla com os remotos mantendo a versão mais recente e preservando itens exclusivos
-        for (const rem of remoteReviews) {
-          if (!rem || !rem.id || deletedList.includes(rem.id) || deletedList.includes(rem.slug)) {
+        // 2. Mescla com os locais apenas para itens criados offline ou edições mais recentes
+        for (const loc of local) {
+          if (!loc || !loc.id || deletedList.includes(loc.id) || deletedList.includes(loc.slug)) {
             continue;
           }
-          const existing = mergedMap.get(rem.id) || Array.from(mergedMap.values()).find(m => m.slug === rem.slug);
+          const existing = mergedMap.get(loc.id) || Array.from(mergedMap.values()).find(m => m.slug === loc.slug);
           if (!existing) {
-            mergedMap.set(rem.id, rem);
+            mergedMap.set(loc.id, loc);
           } else {
-            // Se existir em ambos, compara timestamps para manter a alteração mais recente
+            const locHasRealImg = loc.coverImage && (loc.coverImage.startsWith('http') || loc.coverImage.startsWith('//'));
+            const remHasRealImg = existing.coverImage && (existing.coverImage.startsWith('http') || existing.coverImage.startsWith('//'));
+
             const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
-            const remoteTime = new Date(rem.updatedAt || rem.createdAt || 0).getTime();
-            if (remoteTime > existingTime) {
-              mergedMap.set(rem.id, rem);
+            const localTime = new Date(loc.updatedAt || loc.createdAt || 0).getTime();
+
+            // Se local for mais recente, aplica atualização mantendo a imagem real
+            if (localTime > existingTime) {
+              mergedMap.set(loc.id, {
+                ...loc,
+                // Preserva a imagem real se o local por engano tiver imagem genérica
+                coverImage: (!locHasRealImg && remHasRealImg) ? existing.coverImage : loc.coverImage
+              });
+            }
+          }
+        }
+
+        // 3. Blindagem de imagem: garante que nenhum produto com imagem real fique com genérica
+        const initialMap = new Map(INITIAL_REVIEWS.map(r => [r.id, r]));
+        for (const [id, item] of mergedMap.entries()) {
+          const init = initialMap.get(id) || INITIAL_REVIEWS.find(r => r.slug === item.slug);
+          if (init && init.coverImage && init.coverImage.startsWith('http')) {
+            if (!item.coverImage || item.coverImage.includes('hero_tech_showcase') || item.coverImage.startsWith('/src/assets/')) {
+              item.coverImage = init.coverImage;
+              mergedMap.set(id, item);
             }
           }
         }
@@ -174,18 +224,7 @@ export const StoreService = {
         const mergedReviews = Array.from(new Set(Array.from(mergedMap.values())));
         mergedReviews.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
-        // Se houver itens locais que ainda não estão no Firestore, sincroniza-os em segundo plano
-        for (const loc of local) {
-          const inRemote = remoteReviews.some(r => r.id === loc.id || r.slug === loc.slug);
-          if (!inRemote && !deletedList.includes(loc.id) && !deletedList.includes(loc.slug)) {
-            try {
-              setDoc(doc(db, 'reviews', loc.id), loc, { merge: true });
-            } catch {
-              // background sync deferred
-            }
-          }
-        }
-
+        // Atualiza o localStorage local com os dados corretos
         setLocal(STORAGE_KEYS.REVIEWS, mergedReviews);
         return mergedReviews;
       }
@@ -213,9 +252,19 @@ export const StoreService = {
       otherStores: cleanOtherStores(review.otherStores, review.partnerStore, review.affiliateUrl)
     };
 
-    // Atualização local com preservação de métricas existentes
+    // Proteção de imagem: se o usuário salvar sem trocar a imagem, preserva a foto real do produto
+    const initMatch = INITIAL_REVIEWS.find(r => r.id === cleanReview.id || r.slug === cleanReview.slug);
     const reviews = getLocal<Review[]>(STORAGE_KEYS.REVIEWS, INITIAL_REVIEWS);
     const existingIndex = reviews.findIndex(r => r.id === cleanReview.id || r.slug === cleanReview.slug);
+    const existing = existingIndex >= 0 ? reviews[existingIndex] : null;
+    const isNewImgGeneric = !cleanReview.coverImage || cleanReview.coverImage.includes('hero_tech_showcase') || cleanReview.coverImage.startsWith('/src/assets/');
+    if (isNewImgGeneric) {
+      if (existing?.coverImage && (existing.coverImage.startsWith('http') || existing.coverImage.startsWith('//'))) {
+        cleanReview.coverImage = existing.coverImage;
+      } else if (initMatch?.coverImage && initMatch.coverImage.startsWith('http')) {
+        cleanReview.coverImage = initMatch.coverImage;
+      }
+    }
     let updated: Review[];
     if (existingIndex >= 0) {
       const existing = reviews[existingIndex];
@@ -419,19 +468,142 @@ export const StoreService = {
     }
   },
 
+  // GUIDES / COMPARATIVOS DE PRODUTOS
+  async getGuides(): Promise<ComparisonGuide[]> {
+    const deletedGuides = getLocal<string[]>('achados_deleted_guides', []);
+    const local = getLocal<ComparisonGuide[]>(STORAGE_KEYS.GUIDES, INITIAL_GUIDES)
+      .filter(g => g && !deletedGuides.includes(g.id) && !deletedGuides.includes(g.slug));
+
+    try {
+      const q = query(collection(db, 'guides'), orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        const remoteGuides = snapshot.docs
+          .map(d => {
+            const data = d.data() as ComparisonGuide;
+            return {
+              ...data,
+              id: data.id || d.id
+            };
+          })
+          .filter(g => g && !deletedGuides.includes(g.id) && !deletedGuides.includes(g.slug));
+
+        // Merge remote and local
+        const guideMap = new Map<string, ComparisonGuide>();
+        remoteGuides.forEach(g => guideMap.set(g.id, g));
+        local.forEach(g => {
+          if (!guideMap.has(g.id)) guideMap.set(g.id, g);
+        });
+
+        const merged = Array.from(guideMap.values());
+        merged.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        setLocal(STORAGE_KEYS.GUIDES, merged);
+        return merged;
+      }
+    } catch (err) {
+      console.warn('Using local fallback for guides:', err);
+    }
+    return local;
+  },
+
+  async getGuideBySlug(slug: string): Promise<ComparisonGuide | null> {
+    const guides = await this.getGuides();
+    return guides.find(g => g.slug === slug || g.id === slug) || null;
+  },
+
+  async saveGuide(guide: ComparisonGuide): Promise<void> {
+    const deletedGuides = getLocal<string[]>('achados_deleted_guides', []);
+    if (deletedGuides.includes(guide.id) || deletedGuides.includes(guide.slug)) {
+      setLocal('achados_deleted_guides', deletedGuides.filter(i => i !== guide.id && i !== guide.slug));
+    }
+
+    const guides = getLocal<ComparisonGuide[]>(STORAGE_KEYS.GUIDES, INITIAL_GUIDES);
+    const existingIndex = guides.findIndex(g => g.id === guide.id || g.slug === guide.slug);
+    let updated: ComparisonGuide[];
+
+    const cleanGuide: ComparisonGuide = {
+      ...guide,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (existingIndex >= 0) {
+      const existing = guides[existingIndex];
+      const mergedGuide: ComparisonGuide = {
+        ...existing,
+        ...cleanGuide,
+        createdAt: existing.createdAt || cleanGuide.createdAt,
+        viewsCount: Math.max(existing.viewsCount || 0, cleanGuide.viewsCount || 0)
+      };
+      updated = guides.map((g, i) => i === existingIndex ? mergedGuide : g);
+    } else {
+      updated = [cleanGuide, ...guides];
+    }
+
+    setLocal(STORAGE_KEYS.GUIDES, updated);
+
+    try {
+      await setDoc(doc(db, 'guides', cleanGuide.id), cleanGuide, { merge: true });
+    } catch (err) {
+      console.warn(`Firestore save deferred for guides/${cleanGuide.id}:`, err);
+    }
+  },
+
+  async deleteGuide(id: string): Promise<void> {
+    const guides = getLocal<ComparisonGuide[]>(STORAGE_KEYS.GUIDES, INITIAL_GUIDES);
+    const target = guides.find(g => g.id === id || g.slug === id);
+    const targetId = target ? target.id : id;
+    const targetSlug = target ? target.slug : '';
+
+    const remaining = guides.filter(g => g.id !== targetId && g.slug !== targetId && (targetSlug ? g.slug !== targetSlug : true));
+    setLocal(STORAGE_KEYS.GUIDES, remaining);
+
+    const deletedList = getLocal<string[]>('achados_deleted_guides', []);
+    const toAdd = [targetId];
+    if (targetSlug && !toAdd.includes(targetSlug)) toAdd.push(targetSlug);
+    if (id && !toAdd.includes(id)) toAdd.push(id);
+    setLocal('achados_deleted_guides', Array.from(new Set([...deletedList, ...toAdd])));
+
+    try {
+      await deleteDoc(doc(db, 'guides', targetId));
+      if (id !== targetId) {
+        await deleteDoc(doc(db, 'guides', id));
+      }
+    } catch (err) {
+      console.warn(`Firestore delete deferred for guides/${targetId}:`, err);
+    }
+  },
+
+  async incrementGuideViews(guideId: string): Promise<void> {
+    const guides = getLocal<ComparisonGuide[]>(STORAGE_KEYS.GUIDES, INITIAL_GUIDES);
+    const updated = guides.map(g => (g.id === guideId || g.slug === guideId) ? { ...g, viewsCount: (g.viewsCount || 0) + 1 } : g);
+    setLocal(STORAGE_KEYS.GUIDES, updated);
+
+    try {
+      const target = guides.find(g => g.id === guideId || g.slug === guideId);
+      const docId = target ? target.id : guideId;
+      const ref = doc(db, 'guides', docId);
+      await updateDoc(ref, { viewsCount: increment(1) });
+    } catch {
+      // Non-critical metric increment failure
+    }
+  },
+
   // STATS
   async getStats() {
     const reviews = await this.getReviews();
+    const guides = await this.getGuides();
     const categories = await this.getCategories();
     const banners = await this.getBanners();
     const clicks = getLocal<AffiliateClick[]>(STORAGE_KEYS.CLICKS, []);
 
-    const totalViews = reviews.reduce((acc, r) => acc + (r.viewsCount || 0), 0);
+    const totalViews = reviews.reduce((acc, r) => acc + (r.viewsCount || 0), 0) +
+                       guides.reduce((acc, g) => acc + (g.viewsCount || 0), 0);
     const sumReviewClicks = reviews.reduce((acc, r) => acc + (r.clicksCount || 0), 0);
     const totalClicks = Math.max(clicks.length, sumReviewClicks);
 
     return {
       totalReviews: reviews.length,
+      totalGuides: guides.length,
       totalCategories: categories.length,
       totalBanners: banners.length,
       totalViews,
@@ -441,14 +613,18 @@ export const StoreService = {
   },
 
   // SINCRONIZAÇÃO EM MASSA & BACKUP
-  async syncAllToFirestore(): Promise<{ reviewsCount: number; categoriesCount: number; bannersCount: number }> {
+  async syncAllToFirestore(): Promise<{ reviewsCount: number; guidesCount: number; categoriesCount: number; bannersCount: number }> {
     const reviews = getLocal<Review[]>(STORAGE_KEYS.REVIEWS, INITIAL_REVIEWS);
+    const guides = getLocal<ComparisonGuide[]>(STORAGE_KEYS.GUIDES, INITIAL_GUIDES);
     const categories = getLocal<Category[]>(STORAGE_KEYS.CATEGORIES, INITIAL_CATEGORIES);
     const banners = getLocal<Banner[]>(STORAGE_KEYS.BANNERS, INITIAL_BANNERS);
     const settings = getLocal<SiteSettings>(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS);
 
     for (const r of reviews) {
       await setDoc(doc(db, 'reviews', r.id), r, { merge: true });
+    }
+    for (const g of guides) {
+      await setDoc(doc(db, 'guides', g.id), g, { merge: true });
     }
     for (const c of categories) {
       await setDoc(doc(db, 'categories', c.id), c, { merge: true });
@@ -460,6 +636,7 @@ export const StoreService = {
 
     return {
       reviewsCount: reviews.length,
+      guidesCount: guides.length,
       categoriesCount: categories.length,
       bannersCount: banners.length
     };
@@ -468,6 +645,7 @@ export const StoreService = {
   exportBackup(): string {
     const data = {
       reviews: getLocal<Review[]>(STORAGE_KEYS.REVIEWS, INITIAL_REVIEWS),
+      guides: getLocal<ComparisonGuide[]>(STORAGE_KEYS.GUIDES, INITIAL_GUIDES),
       categories: getLocal<Category[]>(STORAGE_KEYS.CATEGORIES, INITIAL_CATEGORIES),
       banners: getLocal<Banner[]>(STORAGE_KEYS.BANNERS, INITIAL_BANNERS),
       settings: getLocal<SiteSettings>(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS),
@@ -484,6 +662,12 @@ export const StoreService = {
         setLocal(STORAGE_KEYS.REVIEWS, data.reviews);
         for (const r of data.reviews) {
           await setDoc(doc(db, 'reviews', r.id), r, { merge: true });
+        }
+      }
+      if (data.guides && Array.isArray(data.guides)) {
+        setLocal(STORAGE_KEYS.GUIDES, data.guides);
+        for (const g of data.guides) {
+          await setDoc(doc(db, 'guides', g.id), g, { merge: true });
         }
       }
       if (data.categories && Array.isArray(data.categories)) {

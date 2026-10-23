@@ -88,3 +88,39 @@ export interface AffiliateClick {
   timestamp: string;
   referrer?: string;
 }
+
+export interface ComparisonProductItem {
+  id: string;
+  title: string;
+  badge?: string; // Ex: 'Melhor Geral', 'Melhor Custo-Benefício', 'Melhor Desempenho', 'Mais Econômico'
+  rating: number; // 1.0 to 5.0
+  price: string;
+  originalPrice?: string;
+  partnerStore: string;
+  affiliateUrl: string;
+  imageUrl: string;
+  summary: string;
+  pros: string[];
+  cons: string[];
+  keySpecs: { label: string; value: string }[];
+  reviewSlug?: string; // Slug do review individual no site, se existir
+}
+
+export interface ComparisonGuide {
+  id: string;
+  slug: string;
+  title: string;
+  subtitle: string;
+  category: string;
+  coverImage: string;
+  introContent: string;
+  buyingTipsContent?: string;
+  products: ComparisonProductItem[];
+  faqs?: FAQItem[];
+  published: boolean;
+  featured?: boolean;
+  viewsCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+

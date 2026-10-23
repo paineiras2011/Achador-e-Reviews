@@ -28,6 +28,12 @@ service cloud.firestore {
       allow write: if true;
     }
 
+    // Public readable comparison guides, writable by app
+    match /guides/{guideId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
     // Public readable categories, writable by app
     match /categories/{categoryId} {
       allow read: if true;

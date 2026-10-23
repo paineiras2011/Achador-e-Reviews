@@ -85,12 +85,39 @@
         "timestamp": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "reviewId", "partnerStore"]
+    },
+    "Guide": {
+      "title": "Guide",
+      "description": "Product comparison guide and buying guide article with multi-product recommendations",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "slug": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "subtitle": { "type": "string", "maxLength": 300 },
+        "category": { "type": "string", "maxLength": 64 },
+        "coverImage": { "type": "string", "maxLength": 1000 },
+        "introContent": { "type": "string", "maxLength": 20000 },
+        "buyingTipsContent": { "type": "string", "maxLength": 20000 },
+        "products": { "type": "array" },
+        "faqs": { "type": "array" },
+        "published": { "type": "boolean" },
+        "featured": { "type": "boolean" },
+        "viewsCount": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "slug", "title", "category", "published"]
     }
   },
   "firestore": {
     "/reviews/{reviewId}": {
       "schema": "Review",
       "description": "Public catalog of product reviews"
+    },
+    "/guides/{guideId}": {
+      "schema": "Guide",
+      "description": "Public comparison guides and buyer recommendations"
     },
     "/categories/{categoryId}": {
       "schema": "Category",

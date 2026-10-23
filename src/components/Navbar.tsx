@@ -4,7 +4,9 @@ import { Category } from '../types';
 interface NavbarProps {
   categories: Category[];
   activeCategory?: string;
+  isGuidesActive?: boolean;
   onGoHome: () => void;
+  onGoGuides?: () => void;
   onSelectCategory: (categoryName: string) => void;
   onOpenAdmin: () => void;
   isAdminLoggedIn?: boolean;
@@ -13,7 +15,9 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   categories,
   activeCategory,
+  isGuidesActive,
   onGoHome,
+  onGoGuides,
   onSelectCategory,
   onOpenAdmin,
   isAdminLoggedIn
@@ -56,14 +60,28 @@ export const Navbar: React.FC<NavbarProps> = ({
         <nav className="hidden md:flex items-center gap-7 text-sm font-medium text-slate-300">
           <button
             onClick={() => onSelectCategory('all')}
-            className={`hover:text-cyan-400 transition-colors whitespace-nowrap shrink-0 pb-0.5 ${
-              activeCategory === 'all' || !activeCategory
+            className={`hover:text-cyan-400 transition-colors whitespace-nowrap shrink-0 pb-0.5 cursor-pointer ${
+              (activeCategory === 'all' || !activeCategory) && !isGuidesActive
                 ? 'text-cyan-400 font-semibold border-b-2 border-cyan-400'
                 : ''
             }`}
           >
             Início
           </button>
+
+          {onGoGuides && (
+            <button
+              onClick={onGoGuides}
+              className={`hover:text-emerald-400 transition-colors whitespace-nowrap shrink-0 pb-0.5 cursor-pointer flex items-center gap-1 ${
+                isGuidesActive
+                  ? 'text-emerald-400 font-semibold border-b-2 border-emerald-400'
+                  : ''
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Comparativos &amp; Guias</span>
+            </button>
+          )}
 
           {categories.slice(0, 4).map((cat) => {
             const isSelected = activeCategory === cat.name;

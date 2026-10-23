@@ -1,4 +1,4 @@
-import { Review, Category, Banner, SiteSettings } from '../types';
+import { Review, Category, Banner, SiteSettings, ComparisonGuide } from '../types';
 
 export const INITIAL_CATEGORIES: Category[] = [
   {
@@ -505,3 +505,211 @@ export const INITIAL_SETTINGS: SiteSettings = {
   affiliateDisclosure: 'Aviso de Transparência: O Achados & Reviews participa de programas de afiliados (incluindo Amazon Associados, Shopee e Mercado Livre). Todas as análises são 100% independentes. Ao clicar nos links e realizar compras, podemos receber uma comissão sem qualquer custo adicional para você.',
   headerTrackingCode: '<!-- Códigos de Rastreamento Opcionais -->'
 };
+
+export const INITIAL_GUIDES: ComparisonGuide[] = [
+  {
+    id: 'guide-notebooks-2026',
+    slug: 'melhores-notebooks-trabalho-estudo-2026',
+    title: 'Os Melhores Notebooks para Trabalho e Estudo em 2026: Guia Comparativo Completo',
+    subtitle: 'Comparamos tela, processador, autonomia de bateria e custo-benefício real para ajudar você a escolher sem errar.',
+    category: 'Informática & Periféricos',
+    coverImage: 'https://http2.mlstatic.com/D_NQ_NP_602930-MLA111944189869_052026-O.webp',
+    published: true,
+    featured: true,
+    viewsCount: 890,
+    createdAt: '2026-10-22T10:00:00.000Z',
+    updatedAt: '2026-10-22T10:00:00.000Z',
+    introContent: `Escolher um notebook para trabalhar e estudar exige atenção redobrada aos detalhes técnicos: uma tela que não canse a visão, memória suficiente para abrir várias abas e programas simultâneos sem travamentos, e um SSD rápido que inicialize o sistema em segundos.
+
+Neste guia comparativo, analisamos os modelos que mais se destacam no mercado brasileiro pela confiabilidade e custo-benefício. Cada equipamento foi avaliado em critérios como velocidade de processamento, qualidade do teclado, refrigeração e durabilidade do chassi.`,
+    buyingTipsContent: `### O Que Você Deve Observar Antes de Comprar:
+
+1. **Processador e Geração:** Opte por chips Intel Core de 12ª geração em diante ou AMD Ryzen série 5000/7000 para assegurar suporte a novos aplicativos nos próximos anos.
+2. **Memória RAM:** No mínimo 8 GB (preferencialmente expansível ou DDR5) para garantir que multitarefas diárias fluam com rapidez.
+3. **Tela Antirreflexo:** Telas Full HD com acabamento antirreflexo ou taxas de atualização mais altas (como 120Hz) diminuem o cansaço ocular após horas de uso.
+4. **Armazenamento SSD:** Nunca compre aparelhos que usem HD mecânico ou eMMC antigo; o SSD NVMe é essencial para a agilidade do sistema operacional.`,
+    products: [
+      {
+        id: 'prod-dell-15',
+        title: 'Notebook Dell Dc15-i51334u-a50 15.6" Full HD 120Hz Intel i5 8GB 512GB SSD Windows 11',
+        badge: 'Melhor Escolha em Desempenho & Confiabilidade',
+        rating: 4.9,
+        price: 'R$ 4.052,97',
+        originalPrice: 'R$ 5.524,00',
+        partnerStore: 'Mercado Livre',
+        affiliateUrl: 'https://meli.la/2v3pZSW',
+        imageUrl: 'https://http2.mlstatic.com/D_NQ_NP_602930-MLA111944189869_052026-O.webp',
+        reviewSlug: 'notebook-dell-dc15-i51334u-a50-15-6-fhd-i5-8gb-512gb-win-11',
+        summary: 'Com processador Intel Core i5 de 13ª geração e uma tela diferenciada com taxa de 120 Hz, o Dell Inspiron 15 é a máquina ideal para quem exige agilidade profissional, multitarefa intensa e suporte pós-venda renomado.',
+        pros: [
+          'Processador Core i5 de 13ª geração veloz com memória DDR5',
+          'Tela Full HD de 120Hz fluida antirreflexo',
+          'Armazenamento veloz SSD NVMe de 512GB com Windows 11 oficial',
+          'Excelente pós-venda e garantia nacional Dell'
+        ],
+        cons: [
+          'Teclado sem retroiluminação neste lote',
+          'Autonomia de bateria moderada em brilho máximo'
+        ],
+        keySpecs: [
+          { label: 'Processador', value: 'Intel Core i5-1334U (até 4.6 GHz)' },
+          { label: 'Tela', value: '15.6" Full HD (1920x1080) 120Hz' },
+          { label: 'Memória', value: '8 GB DDR5 expansível' },
+          { label: 'Armazenamento', value: '512 GB SSD NVMe' }
+        ]
+      },
+      {
+        id: 'prod-lenovo-ideapad',
+        title: 'Notebook Lenovo IdeaPad 1 15AMN7 AMD Ryzen 5 7520U 8GB 256GB SSD 15.6" FHD',
+        badge: 'Melhor Custo-Benefício Econômico',
+        rating: 4.7,
+        price: 'R$ 2.499,00',
+        originalPrice: 'R$ 3.199,00',
+        partnerStore: 'Mercado Livre',
+        affiliateUrl: 'https://meli.la/2v3pZSW',
+        imageUrl: 'https://http2.mlstatic.com/D_NQ_NP_902094-MLA75537578768_042024-O.webp',
+        summary: 'Uma excelente opção para estudantes e rotinas de escritório que buscam preço acessível sem abrir mão de um bom processador Ryzen de 4 núcleos e 8 threads.',
+        pros: [
+          'Preço altamente competitivo para tarefas diárias',
+          'Processador AMD Ryzen 5 eficiente em consumo de energia',
+          'Webcam com obturador físico de privacidade',
+          'Design fino e peso leve (1.58 kg)'
+        ],
+        cons: [
+          'SSD de 256GB requer uso de nuvem para grandes volumes de arquivos',
+          'Painel TN com fidelidade de cores básica'
+        ],
+        keySpecs: [
+          { label: 'Processador', value: 'AMD Ryzen 5 7520U (até 4.3 GHz)' },
+          { label: 'Tela', value: '15.6" Full HD antirreflexo' },
+          { label: 'Memória', value: '8 GB LPDDR5' },
+          { label: 'Armazenamento', value: '256 GB SSD NVMe' }
+        ]
+      },
+      {
+        id: 'prod-acer-aspire',
+        title: 'Notebook Acer Aspire 5 A515-57 Intel Core i5 12ª Geração 8GB 512GB SSD 15.6" IPS',
+        badge: 'Melhor Tela IPS para Visualização',
+        rating: 4.8,
+        price: 'R$ 3.099,00',
+        originalPrice: 'R$ 3.899,00',
+        partnerStore: 'Mercado Livre',
+        affiliateUrl: 'https://meli.la/2v3pZSW',
+        imageUrl: 'https://http2.mlstatic.com/D_NQ_NP_727453-MLA74676579051_022024-O.webp',
+        summary: 'Destaca-se pelo painel IPS com excelente fidelidade de cores e ângulos de visão, além de contar com tampa superior em alumínio para maior robustez.',
+        pros: [
+          'Tela IPS com ótimos ângulos e contraste superior',
+          'Tampa com acabamento metálico resistente',
+          'Slot livre para expansão de memória RAM até 32 GB',
+          'Conexão Wi-Fi 6 rápida e estável'
+        ],
+        cons: [
+          'Carregador um pouco maior para transporte',
+          'Alto-falantes com volume moderado'
+        ],
+        keySpecs: [
+          { label: 'Processador', value: 'Intel Core i5-12450H' },
+          { label: 'Tela', value: '15.6" Full HD IPS' },
+          { label: 'Memória', value: '8 GB DDR4 (expansível)' },
+          { label: 'Armazenamento', value: '512 GB SSD NVMe' }
+        ]
+      }
+    ],
+    faqs: [
+      {
+        question: 'Qual desses modelos é mais recomendado para planilhas pesadas e navegação intensa?',
+        answer: 'O Dell Inspiron 15 com i5 de 13ª geração e memória DDR5 é o mais recomendado por aliar processamento robusto à tela fluida de 120Hz e suporte confiável.'
+      },
+      {
+        question: 'Os notebooks já vêm com garantia oficial no Brasil?',
+        answer: 'Sim, todos os modelos recomendados possuem garantia nacional de 12 meses direto com as fabricantes autorizadas.'
+      }
+    ]
+  },
+  {
+    id: 'guide-smartphones-2026',
+    slug: 'smartphones-premium-custo-beneficio-2026',
+    title: 'Smartphones Premium Custo-Benefício em 2026: Qual Vale Mais a Pena?',
+    subtitle: 'Comparamos tela Dynamic AMOLED, câmeras com inteligência artificial, processador e bateria.',
+    category: 'Tecnologia & Dispositivos',
+    coverImage: 'https://http2.mlstatic.com/D_NQ_NP_895608-MLA117138199441_092026-O.webp',
+    published: true,
+    featured: true,
+    viewsCount: 650,
+    createdAt: '2026-10-22T11:00:00.000Z',
+    updatedAt: '2026-10-22T11:00:00.000Z',
+    introContent: `O segmento de smartphones intermediários premium se consolidou como a melhor opção de compra para quem busca recursos de topo de linha sem desembolsar valores exorbitantes. Tecnologias como telas de 120Hz, câmeras com estabilização óptica (OIS), gravação 4K e resistência contra poeira e água (IP68) agora estão presentes nesta faixa.
+
+Neste comparativo direto, confrontamos os modelos mais elogiados por especialistas e consumidores para que você saiba exatamente onde investir o seu dinheiro.`,
+    buyingTipsContent: `### Pontos Críticos na Escolha de um Smartphone:
+
+1. **Tecnologia da Tela:** Dê prioridade absoluta a painéis AMOLED ou OLED com 120Hz para pretos profundos, baixo consumo de energia e alta nitidez ao ar livre.
+2. **Estabilização Óptica (OIS):** Essencial para fotos noturnas sem borrões e vídeos sem trepidação durante caminhadas.
+3. **Anos de Suporte e Atualizações:** Marcas que oferecem suporte prolongado de software garantem segurança bancária e longevidade do aparelho.
+4. **Carregamento e Bateria:** Verifique se a potência de recarga é compatível com sua rotina de trabalho.`,
+    products: [
+      {
+        id: 'prod-galaxy-s26fe',
+        title: 'Celular Samsung Galaxy S26 FE 128GB, 8GB RAM Tela 6,7" Dynamic AMOLED 120Hz',
+        badge: 'Melhor Escolha Geral & Longevidade',
+        rating: 5.0,
+        price: 'R$ 3.599,10',
+        originalPrice: 'R$ 5.499,00',
+        partnerStore: 'Mercado Livre',
+        affiliateUrl: 'https://meli.la/165Svx2',
+        imageUrl: 'https://http2.mlstatic.com/D_NQ_NP_895608-MLA117138199441_092026-O.webp',
+        reviewSlug: 'celular-samsung-galaxy-s26-fe-128gb-8gb-ram-tela-6-7-azul-cobalto',
+        summary: 'Equilíbrio primoroso entre tela Dynamic AMOLED deslumbrante, recursos avançados de IA para fotos e vídeos, proteção contra água IP68 e promessa de longo suporte de sistema operacional.',
+        pros: [
+          'Tela Dynamic AMOLED 2X de 120Hz com brilho espetacular',
+          'Câmeras com IA de flagship e estabilização de vídeo avançada',
+          'Construção premium em metal e vidro com certificação IP68',
+          'Suporte prolongado de segurança e atualizações'
+        ],
+        cons: [
+          'Carregador ultrarrápido vendido separadamente por diretriz ambiental'
+        ],
+        keySpecs: [
+          { label: 'Tela', value: '6.7" Dynamic AMOLED 2X 120Hz' },
+          { label: 'Processador', value: 'Octa-Core de alta performance' },
+          { label: 'Câmera Principal', value: '50 MP com OIS e zoom óptico' },
+          { label: 'Bateria', value: '4.700 mAh com recarga rápida' }
+        ]
+      },
+      {
+        id: 'prod-motorola-edge',
+        title: 'Motorola Edge 50 Pro 5G 256GB 12GB RAM Câmeras Validadas Pantone',
+        badge: 'Melhor Carregador na Caixa & Memória',
+        rating: 4.8,
+        price: 'R$ 3.149,00',
+        originalPrice: 'R$ 4.299,00',
+        partnerStore: 'Mercado Livre',
+        affiliateUrl: 'https://meli.la/165Svx2',
+        imageUrl: 'https://http2.mlstatic.com/D_NQ_NP_850239-MLA76044738779_042024-O.webp',
+        summary: 'Chama a atenção pelo design curvilíneo elegante, tela pOLED de 144Hz, generosos 256GB de armazenamento com 12GB de RAM e recarga ultrarrápida de 125W inclusa na caixa.',
+        pros: [
+          'Carregador TurboPower de 125W incluso na caixa',
+          '256 GB de memória e 12 GB de RAM multitarefa',
+          'Acabamento suave em couro vegano e peso super leve',
+          'Tela pOLED de 144Hz rápida'
+        ],
+        cons: [
+          'Menor tempo de suporte a atualizações em comparação à Samsung'
+        ],
+        keySpecs: [
+          { label: 'Tela', value: '6.7" pOLED 144Hz Super HD' },
+          { label: 'Memória', value: '12 GB RAM / 256 GB armazenamento' },
+          { label: 'Carregamento', value: '125W TurboPower na caixa' },
+          { label: 'Câmeras', value: 'Tripla 50 MP + 10 MP Teleobjetiva + 13 MP Ultrawide' }
+        ]
+      }
+    ],
+    faqs: [
+      {
+        question: 'Os links levam para lojas oficiais com nota fiscal?',
+        answer: 'Sim, direcionamos exclusivamente para as lojas e revendedores oficiais autorizados no Mercado Livre com garantia total e nota fiscal.'
+      }
+    ]
+  }
+];
+

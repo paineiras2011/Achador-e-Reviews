@@ -22,6 +22,7 @@ import {
 import { Review, Category, Specification, FAQItem, PartnerOffer } from '../../types';
 import { cleanOtherStores, isSameStore } from '../../utils/storeHelpers';
 import { calculateDiscount } from '../../utils/priceHelpers';
+import { INITIAL_REVIEWS } from '../../data/initialData';
 
 interface ReviewEditorModalProps {
   isOpen: boolean;
@@ -140,7 +141,13 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
       setSlug(reviewToEdit.slug);
       setSubtitle(reviewToEdit.subtitle);
       setCategory(reviewToEdit.category);
-      setCoverImage(reviewToEdit.coverImage);
+      const initialMatch = INITIAL_REVIEWS.find(r => r.id === reviewToEdit.id || r.slug === reviewToEdit.slug);
+      const isGeneric = !reviewToEdit.coverImage || reviewToEdit.coverImage.includes('hero_tech_showcase') || reviewToEdit.coverImage.startsWith('/src/assets/');
+      if (isGeneric && initialMatch && initialMatch.coverImage && initialMatch.coverImage.startsWith('http')) {
+        setCoverImage(initialMatch.coverImage);
+      } else {
+        setCoverImage(reviewToEdit.coverImage);
+      }
       setRating(reviewToEdit.rating);
       setFeatured(!!reviewToEdit.featured);
       setPriceCurrent(reviewToEdit.priceCurrent);

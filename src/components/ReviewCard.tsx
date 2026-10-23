@@ -26,7 +26,10 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({
             alt={review.title}
             referrerPolicy="no-referrer"
             onError={(e) => {
-              (e.currentTarget as HTMLImageElement).src = '/src/assets/images/hero_tech_showcase_1792355762010.jpg';
+              const img = e.currentTarget as HTMLImageElement;
+              if (img.src && img.src.includes('.webp') && img.src.includes('mlstatic.com')) {
+                img.src = img.src.replace('.webp', '.jpg');
+              }
             }}
             className="w-full h-full object-contain p-2 bg-white group-hover:scale-104 transition-transform duration-300"
           />
