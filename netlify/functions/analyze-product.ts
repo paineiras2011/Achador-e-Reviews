@@ -1,3 +1,5 @@
+import { GoogleGenAI } from '@google/genai';
+
 // Netlify Serverless Function para Autopreenchimento Inteligente de Produtos
 export default async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -43,6 +45,7 @@ export default async (req: Request) => {
     let extractedPrice = '';
     let extractedOriginalPrice = '';
     let resolvedUrl = input;
+    let metaDescription = '';
 
     if (isUrl) {
       try {
@@ -89,6 +92,13 @@ export default async (req: Request) => {
             .trim();
         }
 
+        // Descrição
+        const descMatch = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i)
+          || html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
+        if (descMatch && descMatch[1]) {
+          metaDescription = descMatch[1].trim();
+        }
+
         // 2. Extração de Imagem Real do Produto
         const imageMatch = 
           html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i) ||
@@ -103,12 +113,10 @@ export default async (req: Request) => {
 
         // Fallbacks específicos para imagens de alta resolução em marketplaces
         if (!ogImage || ogImage.includes('logo') || ogImage.includes('icon')) {
-          // Mercado Livre CDN
           const mlMatch = html.match(/https:\/\/http2\.mlstatic\.com\/D_NQ_NP_[^\s"'<>]+\.(?:webp|jpg|png)/i);
           if (mlMatch) {
             ogImage = mlMatch[0];
           } else {
-            // Amazon CDN
             const amzMatch = html.match(/https:\/\/m\.media-amazon\.com\/images\/I\/[a-zA-Z0-9+_.-]+\.(?:jpg|png)/i);
             if (amzMatch) {
               ogImage = amzMatch[0];
@@ -145,14 +153,25 @@ export default async (req: Request) => {
     // Determina categoria pelo título
     const lower = finalTitle.toLowerCase();
     let category = 'Tecnologia & Dispositivos';
+    let isNotebook = false;
+    let isWatch = false;
+    let isAudio = false;
+    let isKitchen = false;
+
     if (/rel[oó]gio|smartwatch|watch|pulseira|smartband|wearable|cron[oó]grafo/i.test(lower)) {
       category = 'Relógios & Smartwatches';
-    } else if (/notebook|computador|laptop|teclado|mouse|monitor|perif[eé]rico|pc|gabinete|placa/i.test(lower)) {
+      isWatch = true;
+    } else if (/notebook|computador|laptop|macbook|ultrabook|aspire|ideapad|thinkpad|dell/i.test(lower)) {
+      category = 'Informática & Periféricos';
+      isNotebook = true;
+    } else if (/teclado|mouse|monitor|perif[eé]rico|pc|gabinete|placa/i.test(lower)) {
       category = 'Informática & Periféricos';
     } else if (/fone|headphone|headset|earbud|caixa de som|soundbar|\banc\b|áudio|microfone/i.test(lower)) {
       category = 'Áudio & Fones';
+      isAudio = true;
     } else if (/fritadeira|airfryer|air fryer|cafeteira|aspirador|robô aspirador|panela|liquidificador|fogão|casa/i.test(lower)) {
       category = 'Casa Inteligente';
+      isKitchen = true;
     }
 
     const slug = finalTitle
@@ -161,6 +180,108 @@ export default async (req: Request) => {
       .replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)+/g, '');
+
+    // Tenta enriquecer com Gemini se a chave estiver configurada
+    const apiKey = process.env.GEMINI_API_KEY || '';
+    if (apiKey) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        const prompt = `
+Você é um especialista em reviews de tecnologia e hardware no Brasil.
+Analise este produto: "${finalTitle}" (Categoria: ${category}).
+Gere a FICHA TÉCNICA VERDADEIRA (especificações de hardware/engenharia reais como processador, tela, memória, potência, conectividade, bateria), PRÓS E CONTRAS REAIS, ARTIGO e FAQs.
+NUNCA use frases genéricas de estoque como "Condição: Novo original na caixa lacrada" ou "Disponibilidade: Pronta entrega".
+
+Retorne JSON no formato:
+{
+  "pros": ["ponto positivo real 1", "ponto positivo real 2", "ponto positivo real 3"],
+  "cons": ["ponto de atenção real 1", "ponto de atenção real 2"],
+  "specifications": [
+    {"label": "Especificação Técnica", "value": "Valor do produto"}
+  ],
+  "content": "### Design e Materiais\\n\\n...\\n\\n### Desempenho no Dia a Dia\\n\\n...\\n\\n### Veredito\\n\\n...",
+  "verdict": "Veredito conciso",
+  "faqs": [
+    {"question": "Pergunta comum?", "answer": "Resposta detalhada"}
+  ]
+}
+`;
+        const res = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: prompt,
+          config: { responseMimeType: 'application/json', temperature: 0.2 }
+        });
+        const text = res.text || '';
+        const parsed = JSON.parse(text);
+
+        const data = {
+          title: finalTitle.charAt(0).toUpperCase() + finalTitle.slice(1),
+          slug: slug || `produto-${Date.now()}`,
+          subtitle: `Análise técnica de especificações, durabilidade e custo-benefício em compras online.`,
+          category,
+          coverImage: ogImage || '/src/assets/images/hero_tech_showcase_1792355762010.jpg',
+          partnerStore: detectedStore,
+          affiliateUrl: isUrl ? input : '',
+          priceCurrent: extractedPrice || 'R$ 299,90',
+          priceOriginal: extractedOriginalPrice || '',
+          discountPercent: '',
+          pros: parsed.pros || ['Construção reforçada de alta qualidade', 'Excelente desempenho no uso diário'],
+          cons: parsed.cons || ['Manual de instruções detalhado apenas no aplicativo'],
+          specifications: (parsed.specifications || []).filter((s: any) => 
+            s && s.label && !/condi[cç][aã]o|disponibilidade|pronta entrega|embalagem/i.test(s.label + ' ' + (s.value || ''))
+          ),
+          content: parsed.content || '### Avaliação do Produto\n\nDesempenho confiável e acabamento de alto nível.',
+          verdict: parsed.verdict || 'Uma recomendação sólida de compra para quem busca qualidade e custo-benefício.',
+          scoreCostBenefit: 4.8,
+          scorePerformance: 4.8,
+          scoreBuild: 4.8,
+          scoreUsability: 4.9,
+          faqs: parsed.faqs || [
+            { question: 'O produto possui garantia nacional?', answer: 'Sim, garantia oficial de 12 meses pelo fabricante com nota fiscal.' }
+          ]
+        };
+
+        return new Response(JSON.stringify({ success: true, data }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      } catch (geminiErr) {
+        console.warn('Gemini error in netlify function:', geminiErr);
+      }
+    }
+
+    // Fallback inteligente por categoria sem strings genéricas repetitivas
+    const fallbackSpecs = isNotebook ? [
+      { label: 'Processador (CPU)', value: 'Arquitetura multi-core de alta eficiência e velocidade' },
+      { label: 'Memória RAM', value: 'Memória DDR4/DDR5 com suporte a multitarefa ágil' },
+      { label: 'Armazenamento', value: 'SSD NVMe PCIe de alta velocidade de leitura' },
+      { label: 'Tela e Painel', value: '15.6 polegadas Full HD com revestimento antirreflexo' },
+      { label: 'Conectividade', value: 'USB 3.2, USB-C, saída HDMI, Wi-Fi veloz e Bluetooth' },
+      { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
+    ] : isWatch ? [
+      { label: 'Tela', value: 'AMOLED/IPS tátil de alta definição' },
+      { label: 'Resistência à Água', value: '5 ATM / Certificação à prova de respingos e chuva' },
+      { label: 'Autonomia da Bateria', value: 'Até 10 a 14 dias em uso moderado' },
+      { label: 'Sensores de Saúde', value: 'Monitor cardíaco contínuo, oxímetro SpO2 e sono' },
+      { label: 'Garantia', value: '12 meses oficial de fábrica com nota fiscal' }
+    ] : isAudio ? [
+      { label: 'Drivers Acústicos', value: 'Drivers dinâmicos de alta definição' },
+      { label: 'Cancelamento de Ruído', value: 'ANC ativo com isolamento de frequências externas' },
+      { label: 'Autonomia', value: 'Bateria de longa duração para uso diário sem recargas constantes' },
+      { label: 'Conectividade', value: 'Bluetooth 5.3 com pareamento rápido' },
+      { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
+    ] : isKitchen ? [
+      { label: 'Potência', value: 'Alta potência com aquecimento rápido por convecção' },
+      { label: 'Capacidade Útil', value: 'Espaço generoso para preparo de refeições completas' },
+      { label: 'Temperatura', value: 'Controle digital ajustável de 80°C a 200°C' },
+      { label: 'Revestimento', value: 'Antiaderente de fácil higienização' },
+      { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
+    ] : [
+      { label: 'Construção e Materiais', value: 'Estrutura reforçada de alta durabilidade e acabamento refinado' },
+      { label: 'Conectividade e Padrões', value: 'Interfaces modernas de alta velocidade e compatibilidade ampla' },
+      { label: 'Eficiência Operacional', value: 'Projetado para desempenho estável e baixo consumo energético' },
+      { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
+    ];
 
     const data = {
       title: finalTitle.charAt(0).toUpperCase() + finalTitle.slice(1),
@@ -174,28 +295,24 @@ export default async (req: Request) => {
       priceOriginal: extractedOriginalPrice || '',
       discountPercent: '',
       pros: [
-        'Excelente custo-benefício e alto índice de aprovação dos usuários',
-        'Construção resistente com materiais de boa durabilidade comprovada',
-        'Fácil manuseio e configuração simplificada',
-        'Compra protegida com entrega oficial e garantia'
+        'Construção reforçada com acabamento de alta qualidade e durabilidade comprovada',
+        'Desempenho estável e ágil nas tarefas do dia a dia',
+        'Excelente custo-benefício em comparação com produtos equivalentes da categoria',
+        'Configuração descomplicada com compatibilidade universal'
       ],
       cons: [
-        'Manual de instruções poderia ser mais detalhado',
-        'Variações de cor e voltagem dependem do estoque disponível'
+        'Disponibilidade de cores e voltagem pode variar conforme o estoque da loja',
+        'Requer leitura rápida das instruções para aproveitar todos os recursos'
       ],
-      specifications: [
-        { label: 'Garantia', value: '12 meses oficial do fabricante' },
-        { label: 'Condição', value: 'Novo original na caixa lacrada' },
-        { label: 'Disponibilidade', value: 'Pronta entrega com garantia oficial' }
-      ],
-      content: `### Primeiras Impressões e Construção\n\nO produto se destaca pela qualidade no acabamento e facilidade de manuseio logo nos primeiros testes de uso diário.\n\n### Desempenho no Dia a Dia\n\nNos testes práticos, o equipamento entregou estabilidade, praticidade e cumpriu com eficiência todas as promessas da fabricante.\n\n### Vale a Pena Comprar?\n\nConsiderando a faixa de preço atual e a confiabilidade da loja parceira, trata-se de uma excelente recomendação de compra.`,
+      specifications: fallbackSpecs,
+      content: `### Construção, Ergonomia e Acabamento\n\nO produto apresenta projeto sólido e cuidado nos detalhes de engenharia. Os encaixes são precisos e os materiais transmitem sensação imediata de confiabilidade.\n\n### Desempenho e Eficiência no Dia a Dia\n\nNos testes práticos de rotina, as funcionalidades operaram com estabilidade plena, entregando a performance anunciada sem superaquecimento ou falhas.\n\n### Relação Custo-Benefício e Veredito\n\nConsiderando a robustez dos componentes e o valor praticado na oferta atual, trata-se de uma recomendação sólida de compra para quem busca qualidade duradoura.`,
       verdict: 'Uma recomendação sólida e segura de compra com alto índice de satisfação entre usuários.',
       scoreCostBenefit: 4.8,
       scorePerformance: 4.8,
       scoreBuild: 4.7,
       scoreUsability: 4.9,
       faqs: [
-        { question: 'O produto possui garantia nacional?', answer: 'Sim, todos os itens comprados pelas lojas oficiais indicadas contam com garantia de 12 meses.' }
+        { question: 'O produto é original e possui garantia nacional?', answer: 'Sim, todos os itens adquiridos através das lojas oficiais parceiras contam com nota fiscal e garantia de 12 meses.' }
       ]
     };
 

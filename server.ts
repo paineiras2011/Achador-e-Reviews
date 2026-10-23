@@ -26,7 +26,7 @@ const ai = new GoogleGenAI({
 });
 
 // Tipos de produto categorizados
-type ProductType = 'WATCH' | 'TV' | 'AUDIO' | 'PERIPHERAL' | 'KITCHEN' | 'SMARTPHONE' | 'GENERAL';
+type ProductType = 'WATCH' | 'TV' | 'AUDIO' | 'PERIPHERAL' | 'NOTEBOOK' | 'KITCHEN' | 'SMARTPHONE' | 'GENERAL';
 
 // Identifica a plataforma de e-commerce pelo link
 function detectStore(urlOrText: string): string {
@@ -236,6 +236,7 @@ async function scrapeUrlMetadata(targetUrl: string) {
   let extractedPrice = '';
   let extractedOriginalPrice = '';
   let slugTitle = extractSlugWords(targetUrl);
+  let extractedSnippet = '';
 
   try {
     const controller = new AbortController();
@@ -488,6 +489,20 @@ async function scrapeUrlMetadata(targetUrl: string) {
         ogImage = ogImgMatch[1];
       }
     }
+
+    // Extrai trecho de texto da página com especificações ou recursos
+    extractedSnippet = '';
+    const cleanBody = html
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, '');
+
+    const specsBlockMatch = cleanBody.match(/(?:caracter[íi]sticas|especifica[çc][õo]es|ficha t[ée]cnica|detalhes t[ée]cnicos|technical details|feature-bullets)[\s\S]{100,2500}/i);
+    if (specsBlockMatch) {
+      extractedSnippet = specsBlockMatch[0].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1500);
+    } else if (metaDescription) {
+      extractedSnippet = metaDescription.slice(0, 500);
+    }
   } catch (scrapeErr) {
     // Timeout ou erro de conexão tolerado
   }
@@ -499,7 +514,8 @@ async function scrapeUrlMetadata(targetUrl: string) {
     ogImage,
     slugTitle,
     extractedPrice,
-    extractedOriginalPrice
+    extractedOriginalPrice,
+    extractedSnippet
   };
 }
 
@@ -513,12 +529,17 @@ function classifyProduct(allText: string): ProductType {
   }
 
   // Fones e Áudio
-  if (/\b(fone|fones|headphone|headset|earphone|airpods|caixa de som|bluetooth speaker|jbl|som port[aá]til|earbuds|caixinha de som)\b/i.test(t)) {
+  if (/\b(fone|fones|headphone|headset|earphone|airpods|caixa de som|bluetooth speaker|jbl|som port[aá]til|earbuds|caixinha de som|soundbar)\b/i.test(t)) {
     return 'AUDIO';
   }
 
+  // Notebooks e Laptops (prioritário antes de periféricos genéricos)
+  if (/\b(notebook|laptop|macbook|ultrabook|chromebook|aspire|ideapad|thinkpad|dell inspiron|nitro\s*5|vivobook|galaxy book)\b/i.test(t)) {
+    return 'NOTEBOOK';
+  }
+
   // Periféricos e Informática
-  if (/\b(teclado|mouse|monitor|gabinete|switch mec[aâ]nico|mousepad|webcam|computador|notebook|ssd|placa de v[ií]deo)\b/i.test(t)) {
+  if (/\b(teclado|mouse|monitor|gabinete|switch mec[aâ]nico|mousepad|webcam|computador|pc gamer|ssd|placa de v[ií]deo|gpu|hardware)\b/i.test(t)) {
     return 'PERIPHERAL';
   }
 
@@ -533,7 +554,7 @@ function classifyProduct(allText: string): ProductType {
   }
 
   // Smartphones e Celulares
-  if (/\b(celular|smartphone|iphone|galaxy s|redmi|poco|motorola edge|xiaomi)\b/i.test(t)) {
+  if (/\b(celular|smartphone|iphone|galaxy s|galaxy a|redmi|poco|motorola edge|xiaomi)\b/i.test(t)) {
     return 'SMARTPHONE';
   }
 
@@ -806,6 +827,111 @@ function buildKitchenData(titleHint: string, store: string, ogImage?: string, pr
   };
 }
 
+function buildNotebookData(titleHint: string, store: string, ogImage?: string, priceHint?: string, originalPriceHint?: string) {
+  const cleanTitle = (titleHint && titleHint.length > 5 && !/^(magazine|loja|afiliad)/i.test(titleHint))
+    ? titleHint.charAt(0).toUpperCase() + titleHint.slice(1)
+    : 'Notebook de Alta Produtividade com SSD NVMe e Tela Full HD';
+
+  const slug = generateSlug(cleanTitle) || 'notebook-produtividade-ssd';
+  const priceCurrent = priceHint || 'R$ 2.499,00';
+  const priceOriginal = originalPriceHint || 'R$ 3.299,00';
+  const autoDiscount = calculateDiscountHelper(priceCurrent, priceOriginal);
+
+  return {
+    title: cleanTitle,
+    slug,
+    subtitle: 'Processador veloz para multitarefa, SSD de alta performance e tela antirreflexo com bordas finas.',
+    category: 'Informática & Periféricos',
+    coverImage: ogImage || '/src/assets/images/hero_tech_showcase_1792355762010.jpg',
+    partnerStore: store,
+    priceCurrent,
+    priceOriginal,
+    discountPercent: autoDiscount?.label || '',
+    pros: [
+      'Inicialização do sistema em segundos graças ao armazenamento SSD NVMe de alta velocidade',
+      'Tela com tratamento antirreflexo e excelente nitidez para leitura e trabalho prolongado',
+      'Teclado ergonômico e touchpad responsivo com suporte a gestos multitoque',
+      'Bateria com autonomia para até 7 horas em uso de produtividade e estudos'
+    ],
+    cons: [
+      'Para jogos pesados de última geração requer ajustes nas configurações gráficas',
+      'Slot de expansão de memória pode variar conforme a versão exata do chassi'
+    ],
+    specifications: [
+      { label: 'Processador (CPU)', value: 'Arquitetura multi-core de alto rendimento e baixo consumo' },
+      { label: 'Memória RAM', value: 'Memória DDR4/DDR5 de alta frequência com suporte a multitarefas' },
+      { label: 'Armazenamento', value: 'SSD NVMe PCIe de alta velocidade com leitura instantânea' },
+      { label: 'Tela e Painel', value: '15.6 polegadas Full HD (1920x1080) com acabamento antirreflexo' },
+      { label: 'Conectividade', value: 'Portas USB 3.2, USB Tipo-C, saída HDMI, Wi-Fi veloz e Bluetooth' },
+      { label: 'Bateria e Autonomia', value: 'Bateria com autonomia de até 6 a 8 horas em uso moderado' },
+      { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
+    ],
+    content: `### Desempenho e Produtividade Multitarefa\n\nO notebook entrega agilidade imediata para alternar entre planilhas pesadas, múltiplas abas no navegador e videochamadas sem engasgos. O SSD NVMe faz o sistema ligar em questão de segundos.\n\n### Qualidade de Tela e Conforto Visual\n\nA tela Full HD com acabamento fosco antirreflexo proporciona excelente conforto para os olhos, evitando reflexos de janelas ou lâmpadas de teto durante a jornada de trabalho.\n\n### Construção, Teclado e Portabilidade\n\nO chassi combina leveza para transporte em mochilas com rigidez estrutural adequada. O teclado apresenta curso de tecla macio e espaçamento anatômico.`,
+    verdict: 'Uma das melhores opções de compra para quem precisa de um computador ágil, moderno e confiável para trabalhar ou estudar sem lentidão.',
+    scoreCostBenefit: 4.9,
+    scorePerformance: 4.8,
+    scoreBuild: 4.7,
+    scoreUsability: 4.9,
+    faqs: [
+      { question: 'É possível fazer upgrade de memória RAM ou SSD no futuro?', answer: 'Sim, a maioria dos modelos dessa categoria permite a expansão do SSD ou memória RAM através de slots internos acessíveis.' },
+      { question: 'Acompanha carregador original na caixa?', answer: 'Sim, acompanha adaptador bivolt original de fábrica e cabo de energia padrão brasileiro.' },
+      { question: 'Roda programas de escritório e videochamadas simultâneas?', answer: 'Sim, executa com fluidez pacotes office, navegadores com muitas abas, Zoom, Google Meet e Teams.' }
+    ]
+  };
+}
+
+function buildSmartphoneData(titleHint: string, store: string, ogImage?: string, priceHint?: string, originalPriceHint?: string) {
+  const cleanTitle = (titleHint && titleHint.length > 5 && !/^(magazine|loja|afiliad)/i.test(titleHint))
+    ? titleHint.charAt(0).toUpperCase() + titleHint.slice(1)
+    : 'Smartphone com Conexão 5G, Câmera de Alta Resolução e Bateria Duradoura';
+
+  const slug = generateSlug(cleanTitle) || 'smartphone-5g-camera-bateria';
+  const priceCurrent = priceHint || 'R$ 1.399,00';
+  const priceOriginal = originalPriceHint || 'R$ 1.899,00';
+  const autoDiscount = calculateDiscountHelper(priceCurrent, priceOriginal);
+
+  return {
+    title: cleanTitle,
+    slug,
+    subtitle: 'Conexão 5G veloz, tela fluida de 120Hz e câmera versátil com inteligência artificial.',
+    category: 'Tecnologia & Dispositivos',
+    coverImage: ogImage || '/src/assets/images/hero_tech_showcase_1792355762010.jpg',
+    partnerStore: store,
+    priceCurrent,
+    priceOriginal,
+    discountPercent: autoDiscount?.label || '',
+    pros: [
+      'Tela fluida de alta taxa de atualização que torna a navegação perceptivelmente suave',
+      'Bateria generosa de 5000 mAh que suporta o dia todo com folga longe do carregador',
+      'Câmera principal com sensor de alta definição e inteligência artificial para fotos nítidas',
+      'Conectividade moderna com suporte a 5G e NFC para pagamentos por aproximação'
+    ],
+    cons: [
+      'Carregamento ultra-rápido máximo pode requerer adaptador compatível específico',
+      'Gravações de vídeo prolongadas em alta resolução consomem espaço rapidamente'
+    ],
+    specifications: [
+      { label: 'Processador (SoC)', value: 'Chipset Octa-Core de alta eficiência energética com suporte a 5G' },
+      { label: 'Tela e Painel', value: 'Painel com resolução Full HD+ e taxa de atualização fluida de 120Hz' },
+      { label: 'Câmera Principal', value: 'Sensor de alta definição com IA e modo noturno otimizado' },
+      { label: 'Bateria e Autonomia', value: '5000 mAh com suporte a recarga rápida' },
+      { label: 'Conectividade', value: '5G, Wi-Fi Dual Band, Bluetooth 5.3 e NFC para pagamentos' },
+      { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
+    ],
+    content: `### Fluidez de Tela e Experiência Visual\n\nA taxa de atualização elevada torna qualquer rolagem de redes sociais ou jogos perceptivelmente mais suave. O brilho da tela permite boa leitura sob o sol.\n\n### Qualidade Fotográfica e Versatilidade\n\nO sensor principal entrega fotos com cores vivas e bom alcance dinâmico para postagens imediatas. O modo noturno reduz ruídos em ambientes escuros.\n\n### Autonomia de Bateria para o Dia Todo\n\nA bateria entrega tranquilidade total para um dia inteiro de uso com redes sociais, streaming de música e navegação GPS sem necessidade de recarga no meio do dia.`,
+    verdict: 'Uma escolha equilibrada e certeira para quem deseja um celular moderno, com bateria confiável, câmeras competentes e tecnologia 5G.',
+    scoreCostBenefit: 4.8,
+    scorePerformance: 4.7,
+    scoreBuild: 4.8,
+    scoreUsability: 4.9,
+    faqs: [
+      { question: 'Possui NFC para pagamentos por aproximação na carteira digital?', answer: 'Sim, conta com NFC integrado compatível com Google Carteira e cartões bancários.' },
+      { question: 'Acompanha carregador na embalagem?', answer: 'Sim, a embalagem original oficial inclui cabo USB e carregador correspondente.' },
+      { question: 'Aceita dois chips SIM (Dual Chip)?', answer: 'Sim, possui bandeja Dual SIM para duas linhas ativas simultâneas.' }
+    ]
+  };
+}
+
 function buildGeneralData(titleHint: string, store: string, categoryName: string, ogImage?: string, priceHint?: string, originalPriceHint?: string) {
   const cleanTitle = (titleHint && titleHint.length > 5 && !/^(magazine|loja|afiliad)/i.test(titleHint))
     ? titleHint.charAt(0).toUpperCase() + titleHint.slice(1)
@@ -827,28 +953,31 @@ function buildGeneralData(titleHint: string, store: string, categoryName: string
     priceOriginal,
     discountPercent: autoDiscount?.label || '',
     pros: [
-      'Excelente relação de custo-benefício em comparação com concorrentes diretos',
-      'Construção robusta com materiais duráveis e acabamento refinado',
-      'Fácil configuração e compatibilidade ampla sem necessidade de adaptadores',
-      'Operação silenciosa e eficiente no uso prolongado'
+      'Construção reforçada com materiais de alta durabilidade e acabamento refinado',
+      'Desempenho estável e confiável mesmo sob uso contínuo e intenso',
+      'Excelente relação custo-benefício em comparação com concorrentes diretos',
+      'Operação intuitiva com configuração descomplicada desde o primeiro uso'
     ],
     cons: [
-      'Manual de instruções poderia ser mais detalhado em português',
-      'Disponibilidade de cores adicionais pode variar conforme o estoque'
+      'Disponibilidade de estoque e variações de cor/voltagem podem oscilar',
+      'Requer leitura atenta dos detalhes de instalação e uso para melhor aproveitamento'
     ],
     specifications: [
-      { label: 'Garantia', value: '12 meses oficial com suporte nacional' },
-      { label: 'Conectividade', value: 'Padrão moderno de alta velocidade' },
-      { label: 'Conteúdo da Embalagem', value: 'Aparelho principal, acessórios de conexão e guia rápido' }
+      { label: 'Construção e Materiais', value: 'Estrutura reforçada com acabamento fosco de alta resistência' },
+      { label: 'Conectividade e Padrões', value: 'Interfaces modernas de alta velocidade e compatibilidade universal' },
+      { label: 'Eficiência Energética', value: 'Projetado com baixo consumo e alto rendimento operacional' },
+      { label: 'Compatibilidade', value: 'Padrão multiplataforma compatível com os principais sistemas' },
+      { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
     ],
-    content: `### Primeiras Impressões e Acabamento\n\nLogo ao abrir a embalagem, o produto transmite solidez e cuidado no projeto. As conexões são firmes e o design combina perfeitamente com qualquer ambiente moderno.\n\n### Desempenho e Testes Práticos\n\nNos nossos testes diários, as funcionalidades atenderam com extrema estabilidade. A resposta aos comandos é rápida e não houve qualquer sinal de superaquecimento ou perda de sinal.\n\n### Relação Custo-Benefício\n\nPelo valor praticado na oferta atual, trata-se de uma das opções mais equilibradas da categoria.`,
-    verdict: 'Uma recomendação sólida e segura de compra. Cumpre com maestria o que promete e apresenta excelente índice de satisfação entre os compradores.',
+    content: `### Construção, Ergonomia e Acabamento\n\nO produto apresenta projeto sólido e cuidado nos detalhes de engenharia. Os encaixes são precisos e os materiais transmitem sensação imediata de confiabilidade.\n\n### Desempenho e Eficiência no Dia a Dia\n\nNos testes práticos de rotina, as funcionalidades operaram com estabilidade plena, entregando a performance anunciada sem superaquecimento ou falhas.\n\n### Relação Custo-Benefício e Veredito\n\nConsiderando a robustez dos componentes e o valor praticado na oferta atual, trata-se de uma recomendação sólida de compra para quem busca qualidade duradoura.`,
+    verdict: 'Uma recomendação segura e vantajosa. Cumpre com fidelidade o que promete e apresenta excelente índice de satisfação entre os compradores.',
     scoreCostBenefit: 4.8,
     scorePerformance: 4.8,
-    scoreBuild: 4.7,
+    scoreBuild: 4.8,
     scoreUsability: 4.8,
     faqs: [
-      { question: 'O produto é original e possui garantia?', answer: 'Sim, todos os links indicados levam a vendedores oficiais e autorizados com garantia total de 12 meses.' }
+      { question: 'O produto é original e acompanha nota fiscal?', answer: 'Sim, todos os links indicados direcionam para lojas oficiais com nota fiscal eletrônica e garantia oficial.' },
+      { question: 'Qual o prazo de garantia oferecido?', answer: 'Garantia legal e contratual de 12 meses direto pelo fabricante ou distribuidor oficial no Brasil.' }
     ]
   };
 }
@@ -877,6 +1006,7 @@ app.post('/api/analyze-product', async (req: Request, res: Response) => {
     let extractedPrice = '';
     let extractedOriginalPrice = '';
     let resolvedUrl = trimmedInput;
+    let extractedSnippet = '';
 
     if (isUrl) {
       const scraped = await scrapeUrlMetadata(trimmedInput);
@@ -887,6 +1017,7 @@ app.post('/api/analyze-product', async (req: Request, res: Response) => {
       resolvedUrl = scraped.resolvedUrl;
       extractedPrice = scraped.extractedPrice;
       extractedOriginalPrice = scraped.extractedOriginalPrice;
+      extractedSnippet = scraped.extractedSnippet || '';
     }
 
     // Compila sinais de texto limpos (sem repetição de links)
@@ -894,7 +1025,8 @@ app.post('/api/analyze-product', async (req: Request, res: Response) => {
       trimmedInput,
       slugTitle,
       pageTitle,
-      metaDescription
+      metaDescription,
+      extractedSnippet
     ].join(' ');
 
     // 3. Classifica o nicho com rigor para evitar confusão de categorias
@@ -915,8 +1047,10 @@ app.post('/api/analyze-product', async (req: Request, res: Response) => {
       if (productType === 'WATCH') titleHint = 'Relógio Inteligente Smartwatch com Tela AMOLED e Monitor Cardíaco';
       else if (productType === 'TV') titleHint = 'Smart TV 50 Polegadas 4K UHD com HDR10+';
       else if (productType === 'AUDIO') titleHint = 'Fone de Ouvido Sem Fio com Cancelamento Ativo de Ruído';
+      else if (productType === 'NOTEBOOK') titleHint = 'Notebook de Alta Produtividade com SSD NVMe e Tela Full HD';
       else if (productType === 'PERIPHERAL') titleHint = 'Teclado Mecânico Sem Fio Conexão Tripla';
       else if (productType === 'KITCHEN') titleHint = 'Fritadeira Elétrica Inteligente com Visor';
+      else if (productType === 'SMARTPHONE') titleHint = 'Smartphone com Conexão 5G e Câmera de Alta Resolução';
       else titleHint = 'Produto Selecionado com Alta Classificação';
     }
 
@@ -924,71 +1058,94 @@ app.post('/api/analyze-product', async (req: Request, res: Response) => {
     if (apiKey) {
       try {
         const categoryInstruction = productType === 'WATCH' 
-          ? 'ESTE PRODUTO É RIGOROSAMENTE UM RELÓGIO / SMARTWATCH. NUNCA classifique como TV, eletrodoméstico ou outro item. As especificações DEVEM ser de relógio (resistência à água 5 ATM, bateria em dias, tela AMOLED, sensores de batimento/SpO2 e pulseira).'
+          ? 'ESTE PRODUTO É RIGOROSAMENTE UM RELÓGIO / SMARTWATCH. As especificações DEVEM ser de relógio (tela AMOLED/IPS, autonomia em dias, resistência à água 5 ATM/IP68, sensores de saúde, pulseira).'
           : productType === 'TV'
-          ? 'ESTE PRODUTO É UMA SMART TV / TELEVISÃO. Gere dados específicos de TV (resolução 4K, polegadas, HDR, HDMI).'
+          ? 'ESTE PRODUTO É UMA SMART TV. Gere especificações reais de TV (resolução 4K UHD, polegadas, taxa Hz, sistema operacional, conexões HDMI 2.1, potência de áudio).'
           : productType === 'AUDIO'
-          ? 'ESTE PRODUTO É UM FONE DE OUVIDO / ÁUDIO. Gere dados de fones (ANC cancelamento de ruído, bateria em horas, drivers).'
+          ? 'ESTE PRODUTO É UM FONE DE OUVIDO / ÁUDIO. Gere especificações reais (drivers mm, cancelamento de ruído ANC, autonomia em horas, Bluetooth, codecs).'
+          : productType === 'NOTEBOOK'
+          ? 'ESTE PRODUTO É UM NOTEBOOK / COMPUTADOR PORTÁTIL. Gere especificações reais de notebook (processador exato, memória RAM em GB, SSD NVMe em GB, tela em polegadas e resolução, portas, bateria em horas, sistema operacional, peso).'
           : productType === 'PERIPHERAL'
-          ? 'ESTE PRODUTO É UM PERIFÉRICO / INFORMÁTICA (teclado, mouse ou monitor).'
+          ? 'ESTE PRODUTO É UM PERIFÉRICO / HARDWARE (teclado, mouse, monitor, etc.). Gere especificações técnicas do periférico correspondente.'
           : productType === 'KITCHEN'
-          ? 'ESTE PRODUTO É UM ELETRODOMÉSTICO / CASA (fritadeira, air fryer, cafeteira ou robô).'
-          : 'Identifique o produto real com base no título e na loja.';
+          ? 'ESTE PRODUTO É UM ELETRODOMÉSTICO / CASA (fritadeira, cafeteira, robô). Gere especificações de eletrodoméstico (potência em Watts, capacidade em Litros, temperatura, timer, revestimento, voltagem).'
+          : productType === 'SMARTPHONE'
+          ? 'ESTE PRODUTO É UM SMARTPHONE / CELULAR. Gere especificações reais de celular (processador, memória RAM, armazenamento, câmera principal em MP, tela AMOLED 120Hz, bateria em mAh, 5G/NFC).'
+          : 'Identifique o produto real com base no título e na loja e forneça especificações técnicas verdadeiras do produto.';
 
         const prompt = `
-Você é um redator sênior especializado em e-commerce e resenhas de produtos no Brasil.
-Analise os dados deste produto:
-- Entrada do usuário: "${trimmedInput}"
-- Título extraído do produto: "${titleHint}"
+Você é o mais experiente revisor técnico e analista de hardware, eletrônicos e produtos de consumo do Brasil.
+Analise com rigor absoluto este produto de e-commerce:
+- Entrada do usuário / URL: "${trimmedInput}"
+- Título extraído: "${titleHint}"
+- Trecho da página / Ficha técnica extraída: "${extractedSnippet}"
 - Descrição da loja: "${metaDescription}"
 - Loja parceira: "${detectedStore}"
 ${extractedPrice ? `- Preço real anunciado extraído: "${extractedPrice}"` : ''}
 ${extractedOriginalPrice ? `- Preço original sem desconto extraído: "${extractedOriginalPrice}"` : ''}
 
-REGRAS OBRIGATÓRIAS:
-1. ${categoryInstruction}
-2. O "title" DEVE ser o NOME REAL DO PRODUTO (ex: "Relógio Smartwatch D20 Bluetooth"). NUNCA coloque nomes de lojas de afiliados como "Magazine Fulano", "Loja do João", "Vitrine Ofertas".
-3. NUNCA use termos em inglês como "OFF", "Setup", "Gadgets", "Wireless", "Features". Use apenas termos naturais em português do Brasil.
-4. O link de afiliado original informado pelo usuário DEVE ser mantido integralmente.
-5. PREÇOS REAIS:
-${extractedPrice ? `   - Use OBRIGATORIAMENTE "${extractedPrice}" no campo "priceCurrent".` : '   - Pesquise ou forneça o preço real atual de mercado no Brasil no formato "R$ XX,XX".'}
-${extractedOriginalPrice ? `   - Use OBRIGATORIAMENTE "${extractedOriginalPrice}" no campo "priceOriginal".` : '   - Forneça o preço de tabela original sem desconto no formato "R$ XX,XX".'}
-   - O campo "discountPercent" deve refletir com exatidão matemática o desconto percentual real: ((priceOriginal - priceCurrent) / priceOriginal) * 100.
-6. NÃO inclua campos de cupons de desconto.
+DIRETRIZES DE CATEGORIA:
+${categoryInstruction}
+
+REGRAS DE CONTEÚDO TÉCNICO VERDADEIRO (CRÍTICO):
+1. O "title" DEVE ser o NOME REAL E COMPLETO DO PRODUTO (ex: "Notebook Acer Aspire 5 A515-57-55B8 Intel Core i5 8GB 256GB SSD" ou "Relógio Smartwatch D20 Bluetooth"). NUNCA coloque nomes de lojas de afiliados como "Magazine Fulano", "Loja do João", "Achados".
+2. NUNCA use termos em inglês soltos ("OFF", "Setup", "Gadgets", "Wireless", "Features"). Use termos naturais em português do Brasil.
+3. FICHA TÉCNICA VERDADEIRA ("specifications"): Deve conter entre 5 e 8 especificações de engenharia e componentes REAIS deste modelo exato:
+   - PROIBIÇÃO RIGOROSA: NUNCA gere itens genéricos de inventário como "Condição: Novo original na caixa lacrada", "Disponibilidade: Pronta entrega com garantia oficial", "Embalagem: Caixa". Isso arruína a credibilidade do site. Forneça APENAS dados técnicos do produto (Processador, Memória, Tela, Bateria, Potência, Dimensões, Sensores, etc.)!
+4. PRÓS E CONTRAS REAIS:
+   - "pros": 3 a 5 pontos fortes técnicos e de uso prático REAIS deste produto específico.
+   - "cons": 2 a 3 limitações honestas, pontos de atenção ou trade-offs reais deste modelo.
+5. ARTIGO E VEREDITO:
+   - "content": Artigo estruturado em Markdown com exatamente 3 seções:
+     ### Design, Materiais e Construção
+     ### Desempenho e Recursos no Uso Diário
+     ### Vale a Pena? Análise de Custo-Benefício
+     (Escreva parágrafos ricos em português com vocabulário técnico de especialista).
+   - "verdict": Veredito direto, sincero e conclusivo para o consumidor brasileiro.
+6. PERGUNTAS FREQUENTES ("faqs"):
+   - Entre 3 e 5 perguntas reais que compradores reais deste produto costumam fazer antes de fechar a compra (sobre voltagem, conectividade, upgrades, cabos inclusos, durabilidade), com respostas detalhadas e esclarecedoras.
+7. PREÇOS:
+${extractedPrice ? `   - Use OBRIGATORIAMENTE "${extractedPrice}" no campo "priceCurrent".` : '   - Forneça o preço de mercado real no Brasil no formato "R$ XX,XX".'}
+${extractedOriginalPrice ? `   - Use OBRIGATORIAMENTE "${extractedOriginalPrice}" no campo "priceOriginal".` : '   - Forneça o preço sem desconto no formato "R$ XX,XX".'}
 
 Retorne EXCLUSIVAMENTE um objeto JSON válido:
 {
-  "title": "Título comercial do produto em português (máx 80 caracteres)",
-  "slug": "url-amigavel-do-produto-em-letras-minusculas",
-  "subtitle": "Subtítulo explicativo com principal benefício (1 a 2 frases)",
+  "title": "Nome Real e Completo do Produto",
+  "slug": "url-amigavel-do-produto",
+  "subtitle": "Subtítulo explicativo com principal benefício técnico",
   "category": "${
     productType === 'WATCH' ? 'Relógios & Smartwatches' :
     productType === 'TV' ? 'Tecnologia & Dispositivos' :
     productType === 'AUDIO' ? 'Áudio & Fones' :
+    productType === 'NOTEBOOK' ? 'Informática & Periféricos' :
     productType === 'PERIPHERAL' ? 'Informática & Periféricos' :
-    productType === 'KITCHEN' ? 'Casa Inteligente' : 'Tecnologia & Dispositivos'
+    productType === 'KITCHEN' ? 'Casa Inteligente' :
+    productType === 'SMARTPHONE' ? 'Tecnologia & Dispositivos' : 'Tecnologia & Dispositivos'
   }",
   "partnerStore": "${detectedStore}",
   "priceCurrent": "${extractedPrice || 'R$ 299,90'}",
   "priceOriginal": "${extractedOriginalPrice || 'R$ 399,00'}",
-  "discountPercent": "Percentual calculado em português (ex: '25% de desconto')",
-  "pros": ["Ponto positivo 1", "Ponto positivo 2", "Ponto positivo 3", "Ponto positivo 4"],
-  "cons": ["Ponto de atenção 1", "Ponto de atenção 2"],
+  "discountPercent": "Percentual calculado em português",
+  "pros": ["Ponto positivo específico 1", "Ponto positivo específico 2", "Ponto positivo específico 3", "Ponto positivo específico 4"],
+  "cons": ["Ponto de atenção específico 1", "Ponto de atenção específico 2"],
   "specifications": [
-    {"label": "Especificação 1", "value": "Valor detalhado"},
-    {"label": "Especificação 2", "value": "Valor detalhado"},
-    {"label": "Especificação 3", "value": "Valor detalhado"},
-    {"label": "Garantia", "value": "12 meses oficial de fábrica"}
+    {"label": "Especificação Técnica 1", "value": "Valor exato do produto"},
+    {"label": "Especificação Técnica 2", "value": "Valor exato do produto"},
+    {"label": "Especificação Técnica 3", "value": "Valor exato do produto"},
+    {"label": "Especificação Técnica 4", "value": "Valor exato do produto"},
+    {"label": "Especificação Técnica 5", "value": "Valor exato do produto"},
+    {"label": "Garantia Oficial", "value": "12 meses pelo fabricante com nota fiscal"}
   ],
-  "content": "Artigo estruturado em seções '### Design e Conforto', '### Recursos e Desempenho' e '### Bateria e Usabilidade'. Escreva 3 parágrafos em português.",
+  "content": "Artigo estruturado em seções '### Design, Materiais e Construção', '### Desempenho e Recursos no Uso Diário' e '### Vale a Pena? Análise de Custo-Benefício'.",
   "verdict": "Veredito direto sobre o custo-benefício.",
   "scoreCostBenefit": 4.9,
   "scorePerformance": 4.8,
   "scoreBuild": 4.8,
   "scoreUsability": 4.9,
   "faqs": [
-    {"question": "Pergunta comum 1?", "answer": "Resposta detalhada 1"},
-    {"question": "Pergunta comum 2?", "answer": "Resposta detalhada 2"}
+    {"question": "Pergunta comum e prática 1?", "answer": "Resposta detalhada 1"},
+    {"question": "Pergunta comum e prática 2?", "answer": "Resposta detalhada 2"},
+    {"question": "Pergunta comum e prática 3?", "answer": "Resposta detalhada 3"}
   ]
 }
 `;
@@ -1003,7 +1160,7 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido:
         });
 
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout Gemini')), 5000)
+          setTimeout(() => reject(new Error('Timeout Gemini')), 25000)
         );
 
         const response: any = await Promise.race([geminiPromise, timeoutPromise]);
@@ -1024,6 +1181,13 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido:
         // Recalcula o desconto com precisão matemática estrita
         const calculatedDisc = calculateDiscountHelper(parsed.priceCurrent, parsed.priceOriginal);
         parsed.discountPercent = calculatedDisc?.label || '';
+
+        // Filtra especificações para garantir que nenhuma seja texto genérico de inventário
+        if (Array.isArray(parsed.specifications)) {
+          parsed.specifications = parsed.specifications.filter((s: any) => 
+            s && s.label && !/condi[cç][aã]o|disponibilidade|pronta entrega|embalagem/i.test(s.label + ' ' + (s.value || ''))
+          );
+        }
 
         // Remove quaisquer menções a cupons
         delete parsed.couponCode;
@@ -1061,10 +1225,14 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido:
       finalData = buildTvData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice);
     } else if (productType === 'AUDIO') {
       finalData = buildAudioData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice);
+    } else if (productType === 'NOTEBOOK') {
+      finalData = buildNotebookData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice);
     } else if (productType === 'PERIPHERAL') {
       finalData = buildPeripheralData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice);
     } else if (productType === 'KITCHEN') {
       finalData = buildKitchenData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice);
+    } else if (productType === 'SMARTPHONE') {
+      finalData = buildSmartphoneData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice);
     } else {
       finalData = buildGeneralData(titleHint, detectedStore, 'Tecnologia & Dispositivos', ogImage, extractedPrice, extractedOriginalPrice);
     }
@@ -1072,6 +1240,130 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido:
     res.json({ success: true, data: finalData });
   } catch (error) {
     console.error('Erro geral no endpoint /api/analyze-product:', error);
+    res.status(500).json({ error: 'Erro ao processar produto.' });
+  }
+});
+
+// Endpoint dedicado para enriquecer Ficha Técnica, Prós/Contras, Artigo e FAQs com IA
+app.post('/api/enrich-details', async (req: Request, res: Response) => {
+  try {
+    const { title, category, affiliateUrl } = req.body;
+    if (!title || typeof title !== 'string' || title.trim().length < 2) {
+      res.status(400).json({ error: 'Título do produto é obrigatório para extrair informações reais.' });
+      return;
+    }
+
+    const cleanTitle = cleanProductTitle(title.trim());
+    const combinedSignals = `${cleanTitle} ${category || ''} ${affiliateUrl || ''}`;
+    const productType = classifyProduct(combinedSignals);
+
+    if (apiKey) {
+      try {
+        const prompt = `
+Você é um especialista e revisor técnico sênior de hardware, eletrônicos e produtos de consumo no Brasil.
+O usuário está cadastrando este produto e precisa da FICHA TÉCNICA VERDADEIRA, PRÓS E CONTRAS REAIS, ARTIGO DE AVALIAÇÃO e PERGUNTAS FREQUENTES ESPECÍFICAS deste modelo exato:
+
+- Nome do Produto: "${cleanTitle}"
+- Categoria pretendida: "${category || 'Tecnologia & Dispositivos'}"
+${affiliateUrl ? `- Link de referência: "${affiliateUrl}"` : ''}
+
+REGRAS OBRIGATÓRIAS:
+1. FICHA TÉCNICA VERDADEIRA ("specifications"): Forneça entre 5 e 8 especificações de engenharia e componentes REAIS deste modelo (ex: Processador, Memória RAM, Armazenamento, Resolução de Tela, Autonomia de Bateria, Conectividade, Potência em Watts, Capacidade em Litros, Sensores, etc.).
+   PROIBIÇÃO RIGOROSA: NUNCA inclua textos de estoque como "Condição: Novo original na caixa lacrada", "Disponibilidade: Pronta entrega com garantia oficial", "Embalagem: Caixa". Apenas especificações técnicas reais do produto!
+2. PRÓS E CONTRAS REAIS:
+   - "pros": 3 a 5 pontos positivos técnicos e práticos REAIS deste modelo exato.
+   - "cons": 2 a 3 limitações honestas, pontos fracos ou cuidados de compra REAIS deste modelo.
+3. ARTIGO DE AVALIAÇÃO ("content"):
+   Escreva 3 seções detalhadas em Markdown:
+   ### Construção, Ergonomia e Design
+   ### Desempenho e Recursos no Uso Real
+   ### Vale a Pena Comprar? Custo-Benefício
+4. VEREDITO ("verdict"):
+   Conclusão concisa e confiável para orientar o comprador.
+5. PERGUNTAS FREQUENTES ("faqs"):
+   3 a 5 perguntas reais com respostas detalhadas que compradores reais costumam fazer sobre este produto específico.
+6. NOTAS (1.0 a 5.0):
+   scoreCostBenefit, scorePerformance, scoreBuild, scoreUsability.
+
+Retorne EXCLUSIVAMENTE um objeto JSON válido:
+{
+  "pros": ["string", "string", "string", "string"],
+  "cons": ["string", "string"],
+  "specifications": [
+    {"label": "string", "value": "string"}
+  ],
+  "content": "string com seções ###",
+  "verdict": "string",
+  "faqs": [
+    {"question": "string?", "answer": "string"}
+  ],
+  "scoreCostBenefit": 4.8,
+  "scorePerformance": 4.8,
+  "scoreBuild": 4.7,
+  "scoreUsability": 4.9
+}
+`;
+
+        const geminiPromise = ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            temperature: 0.2
+          }
+        });
+
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Timeout Gemini')), 25000)
+        );
+
+        const response: any = await Promise.race([geminiPromise, timeoutPromise]);
+        const text = response.text || '';
+        const parsed = JSON.parse(text);
+
+        // Limpeza de segurança para remover qualquer boilerplate genérico
+        if (Array.isArray(parsed.specifications)) {
+          parsed.specifications = parsed.specifications.filter((s: any) => 
+            s && s.label && !/condi[cç][aã]o|disponibilidade|pronta entrega|embalagem/i.test(s.label + ' ' + (s.value || ''))
+          );
+        }
+
+        res.json({ success: true, data: parsed });
+        return;
+      } catch (geminiError) {
+        console.warn('Enriquecimento com Gemini falhou, usando gerador especializado:', geminiError);
+      }
+    }
+
+    // Fallback inteligente garantido por nicho
+    let fallbackData;
+    if (productType === 'NOTEBOOK') fallbackData = buildNotebookData(cleanTitle, 'Loja Oficial');
+    else if (productType === 'SMARTPHONE') fallbackData = buildSmartphoneData(cleanTitle, 'Loja Oficial');
+    else if (productType === 'WATCH') fallbackData = buildWatchData(cleanTitle, 'Loja Oficial');
+    else if (productType === 'TV') fallbackData = buildTvData(cleanTitle, 'Loja Oficial');
+    else if (productType === 'AUDIO') fallbackData = buildAudioData(cleanTitle, 'Loja Oficial');
+    else if (productType === 'PERIPHERAL') fallbackData = buildPeripheralData(cleanTitle, 'Loja Oficial');
+    else if (productType === 'KITCHEN') fallbackData = buildKitchenData(cleanTitle, 'Loja Oficial');
+    else fallbackData = buildGeneralData(cleanTitle, 'Loja Oficial', category || 'Tecnologia & Dispositivos');
+
+    res.json({
+      success: true,
+      data: {
+        pros: fallbackData.pros,
+        cons: fallbackData.cons,
+        specifications: fallbackData.specifications,
+        content: fallbackData.content,
+        verdict: fallbackData.verdict,
+        faqs: fallbackData.faqs,
+        scoreCostBenefit: fallbackData.scoreCostBenefit,
+        scorePerformance: fallbackData.scorePerformance,
+        scoreBuild: fallbackData.scoreBuild,
+        scoreUsability: fallbackData.scoreUsability
+      }
+    });
+  } catch (err) {
+    console.error('Erro em /api/enrich-details:', err);
+    res.status(500).json({ error: 'Erro ao extrair informações reais.' });
   }
 });
 
