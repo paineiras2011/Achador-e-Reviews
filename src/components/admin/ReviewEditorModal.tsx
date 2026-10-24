@@ -243,11 +243,15 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
 
     // 1. Tenta a rota /api/analyze-product (funciona via server.ts local e _redirects na Netlify)
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
       const response = await fetch('/api/analyze-product', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: trimmedInput })
+        body: JSON.stringify({ input: trimmedInput }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       if (response.ok) {
         const json = await response.json();
         if (json.success && json.data) {
@@ -261,11 +265,15 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
     // 2. Se a primeira tentativa falhar, tenta rota direta da Netlify Function
     if (!resultData) {
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
         const response = await fetch('/.netlify/functions/analyze-product', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ input: trimmedInput })
+          body: JSON.stringify({ input: trimmedInput }),
+          signal: controller.signal
         });
+        clearTimeout(timeoutId);
         if (response.ok) {
           const json = await response.json();
           if (json.success && json.data) {
@@ -281,7 +289,7 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
     if (!resultData) {
       const isUrl = /^https?:\/\//i.test(trimmedInput);
       let detectedStore = 'Loja Parceira Oficial';
-      if (/amazon\.com(\.br)?|amzn\.to|a\.co/i.test(trimmedInput)) detectedStore = 'Amazon Brasil';
+      if (/amazon\.com(\.br)?|amzn\.to|(^|https?:\/\/|\.)a\.co(\/|$)/i.test(trimmedInput)) detectedStore = 'Amazon Brasil';
       else if (/mercadolivre\.com(\.br)?|meli\.la|produto\.mercadolivre/i.test(trimmedInput)) detectedStore = 'Mercado Livre';
       else if (/shopee\.com(\.br)?|s\.shopee/i.test(trimmedInput)) detectedStore = 'Shopee Oficial';
       else if (/magazineluiza|magazinevoce|magalu/i.test(trimmedInput)) detectedStore = 'Magazine Luiza';
@@ -290,10 +298,19 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
       if (isUrl) {
         try {
           const parsed = new URL(trimmedInput);
-          const segments = parsed.pathname.split('/').filter(Boolean);
-          const candidate = segments.find(s => s.length > 5 && !/^(dp|gp|p|MLB[0-9]+)$/i.test(s));
-          if (candidate) {
-            extractedTitle = decodeURIComponent(candidate).replace(/[-_+]/g, ' ');
+          const isShortener = /^(s\.shopee|amzn\.to|a\.co|meli\.la|magalu\.me|bit\.ly|tinyurl)/i.test(parsed.hostname);
+          if (!isShortener) {
+            const segments = parsed.pathname.split('/').filter(Boolean);
+            const candidate = segments.find(s => s.length > 5 && !/^(dp|gp|p|MLB[0-9]+|opaanlp|gz)$/i.test(s) && /[-_+% ]/.test(s));
+            if (candidate) {
+              extractedTitle = decodeURIComponent(candidate)
+                .replace(/^MLB[-_]?[0-9]+[-_]?/i, '')
+                .replace(/[-_]JM$/i, '')
+                .replace(/[-_+]/g, ' ')
+                .trim();
+            }
+          } else {
+            extractedTitle = 'Produto Selecionado';
           }
         } catch {
           // Mantém trimmedInput
@@ -304,12 +321,16 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
       // Categoria por palavras-chave
       const lower = extractedTitle.toLowerCase();
       let matchedCat = 'Tecnologia & Dispositivos';
+      let isMobility = false;
       let isNotebook = false;
       let isWatch = false;
       let isAudio = false;
       let isKitchen = false;
 
-      if (/rel[oó]gio|smartwatch|watch|pulseira|smartband/i.test(lower)) {
+      if (/bicicleta|bike|scooter|patinete|el[eé]trica|mobilidade|ebike/i.test(lower)) {
+        matchedCat = 'Mobilidade & Esportes';
+        isMobility = true;
+      } else if (/rel[oó]gio|smartwatch|watch|pulseira|smartband/i.test(lower)) {
         matchedCat = 'Relógios & Smartwatches';
         isWatch = true;
       } else if (/notebook|computador|laptop|macbook|ultrabook|aspire|ideapad|thinkpad|dell/i.test(lower)) {
@@ -333,7 +354,15 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
         .replace(/(^-|-$)+/g, '');
 
       // Ficha técnica precisa por nicho (sem placeholders genéricos de estoque)
-      const dynamicSpecs = isNotebook ? [
+      const dynamicSpecs = isMobility ? [
+        { label: 'Motor e Potência', value: '400W de alta eficiência com aceleração progressiva' },
+        { label: 'Bateria e Alimentação', value: '48V Bateria de Lítio Removível Bivolt 110V/220V' },
+        { label: 'Autonomia Estimada', value: '20 a 30 km por carga completa' },
+        { label: 'Velocidade Máxima', value: 'Até 25 km/h com seletor de velocidade' },
+        { label: 'Sistema de Frenagem', value: 'Freios a disco mecânico duplo (dianteiro e traseiro)' },
+        { label: 'Estrutura', value: 'Quadro reforçado com design dobrável portátil' },
+        { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
+      ] : isNotebook ? [
         { label: 'Processador (CPU)', value: 'Arquitetura moderna multi-core de alto rendimento' },
         { label: 'Memória RAM', value: 'Memória DDR4/DDR5 com suporte a multitarefas' },
         { label: 'Armazenamento', value: 'SSD NVMe PCIe de alta velocidade de leitura' },

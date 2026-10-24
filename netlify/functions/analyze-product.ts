@@ -33,7 +33,7 @@ export default async (req: Request) => {
 
     const isUrl = /^https?:\/\//i.test(input);
     let detectedStore = 'Loja Parceira Oficial';
-    if (/amazon\.com(\.br)?|amzn\.to|a\.co/i.test(input)) detectedStore = 'Amazon Brasil';
+    if (/amazon\.com(\.br)?|amzn\.to|(^|https?:\/\/|\.)a\.co(\/|$)/i.test(input)) detectedStore = 'Amazon Brasil';
     else if (/mercadolivre\.com(\.br)?|meli\.la|produto\.mercadolivre/i.test(input)) detectedStore = 'Mercado Livre';
     else if (/shopee\.com(\.br)?|s\.shopee/i.test(input)) detectedStore = 'Shopee Oficial';
     else if (/magazineluiza|magazinevoce|magalu/i.test(input)) detectedStore = 'Magazine Luiza';
@@ -49,24 +49,45 @@ export default async (req: Request) => {
 
     if (isUrl) {
       try {
+        const isShopee = /shopee\.com(\.br)?|s\.shopee/i.test(input);
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
+        const timeout = setTimeout(() => controller.abort(), 4000);
 
         const res = await fetch(input, {
           signal: controller.signal,
           redirect: 'follow',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8'
-          }
+          headers: isShopee
+            ? {
+                'User-Agent': 'WhatsApp/2.21.12.21 A',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8'
+              }
+            : {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8'
+              }
         });
         clearTimeout(timeout);
         resolvedUrl = res.url || input;
 
+        // Se o Mercado Livre redirecionou para account-verification, recupera a URL de destino pelo parâmetro ?go=
+        if (resolvedUrl.includes('account-verification') && resolvedUrl.includes('go=')) {
+          try {
+            const u = new URL(resolvedUrl);
+            const goTarget = u.searchParams.get('go');
+            if (goTarget) {
+              resolvedUrl = decodeURIComponent(goTarget);
+            }
+          } catch {
+            resolvedUrl = input;
+          }
+        }
+
         // Atualiza a loja detectada se a URL resolvida mudar (ex: meli.la -> mercadolivre.com.br)
         if (/mercadolivre\.com(\.br)?|produto\.mercadolivre/i.test(resolvedUrl)) detectedStore = 'Mercado Livre';
         else if (/amazon\.com(\.br)?/i.test(resolvedUrl)) detectedStore = 'Amazon Brasil';
+        else if (/shopee\.com(\.br)?|s\.shopee/i.test(resolvedUrl)) detectedStore = 'Shopee Oficial';
 
         const html = await res.text();
 
@@ -79,17 +100,22 @@ export default async (req: Request) => {
           html.match(/<title>([^<]+)<\/title>/i);
 
         if (titleMatch) {
-          pageTitle = titleMatch[1]
+          const rawCandidate = titleMatch[1]
             .replace(/&amp;/g, '&')
             .replace(/&quot;/g, '"')
             .replace(/&#39;|&apos;/g, "'")
             .replace(/&lt;/g, '<')
             .replace(/&gt;/g, '>')
-            .replace(/\s*\|\s*(Mercado\s*Livre|Amazon|Shopee|Magalu|Magazine).*$/i, '')
-            .replace(/\s*[-–]\s*(Mercado\s*Livre|Amazon|Shopee|Magalu|Magazine).*$/i, '')
+            .replace(/\s*\|\s*(Mercado\s*Li[bv]re|Amazon|Shopee|Magalu|Magazine).*$/i, '')
+            .replace(/\s*[-–]\s*(Mercado\s*Li[bv]re|Amazon|Shopee|Magalu|Magazine).*$/i, '')
             .replace(/\s*no\s+Mercado\s+Livre.*$/i, '')
             .replace(/Frete grátis no Mercado Livre/i, '')
             .trim();
+
+          // Descarta telas de login e verificação
+          if (!/^(mercado\s*li[bv]re|acesse|login|aten[çc][aã]o|verifique|seguran[çc]a|captcha|robot check|404)/i.test(rawCandidate)) {
+            pageTitle = rawCandidate;
+          }
         }
 
         // Descrição
@@ -145,10 +171,27 @@ export default async (req: Request) => {
       }
     }
 
-    const finalTitle = pageTitle || input
-      .replace(/^https?:\/\/[^\/]+\//i, '')
-      .replace(/[-_]+/g, ' ')
-      .trim();
+    // Se a URL for um encurtador de afiliados (s.shopee, amzn.to, meli.la, etc.), não usa o token hash como título!
+    const isShortener = /^(s\.shopee|amzn\.to|a\.co|meli\.la|magalu\.me|bit\.ly|tinyurl)/i.test(input);
+    let fallbackTitleFromUrl = '';
+    if (!isShortener) {
+      try {
+        const u = new URL(resolvedUrl);
+        const segs = u.pathname.split('/').filter(Boolean);
+        const cand = segs.find(s => s.length > 5 && !/^(dp|gp|p|MLB[0-9]+|opaanlp|gz)$/i.test(s) && /[-_+% ]/.test(s));
+        if (cand) {
+          fallbackTitleFromUrl = decodeURIComponent(cand)
+            .replace(/^MLB[-_]?[0-9]+[-_]?/i, '')
+            .replace(/[-_]JM$/i, '')
+            .replace(/[-_+]/g, ' ')
+            .trim();
+        }
+      } catch {
+        // Ignora
+      }
+    }
+
+    const finalTitle = pageTitle || fallbackTitleFromUrl || (isShortener ? 'Produto Selecionado' : input.replace(/^https?:\/\/[^\/]+\//i, '').replace(/[-_]+/g, ' ').trim());
 
     // Determina categoria pelo título
     const lower = finalTitle.toLowerCase();
@@ -158,7 +201,9 @@ export default async (req: Request) => {
     let isAudio = false;
     let isKitchen = false;
 
-    if (/rel[oó]gio|smartwatch|watch|pulseira|smartband|wearable|cron[oó]grafo/i.test(lower)) {
+    if (/bicicleta|bike|scooter|patinete|el[eé]trica|mobilidade|ebike/i.test(lower)) {
+      category = 'Mobilidade & Esportes';
+    } else if (/rel[oó]gio|smartwatch|watch|pulseira|smartband|wearable|cron[oó]grafo/i.test(lower)) {
       category = 'Relógios & Smartwatches';
       isWatch = true;
     } else if (/notebook|computador|laptop|macbook|ultrabook|aspire|ideapad|thinkpad|dell/i.test(lower)) {
@@ -206,11 +251,17 @@ Retorne JSON no formato:
   ]
 }
 `;
-        const res = await ai.models.generateContent({
+        const geminiPromise = ai.models.generateContent({
           model: 'gemini-3.8-flash',
           contents: prompt,
-          config: { responseMimeType: 'application/json', temperature: 0.2 }
+          config: { responseMimeType: 'application/json', temperature: 0.2, maxOutputTokens: 1800 }
         });
+
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Timeout Gemini')), 7000)
+        );
+
+        const res: any = await Promise.race([geminiPromise, timeoutPromise]);
         const text = res.text || '';
         const parsed = JSON.parse(text);
 

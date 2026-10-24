@@ -26,13 +26,13 @@ const ai = new GoogleGenAI({
 });
 
 // Tipos de produto categorizados
-type ProductType = 'WATCH' | 'TV' | 'AUDIO' | 'PERIPHERAL' | 'NOTEBOOK' | 'KITCHEN' | 'SMARTPHONE' | 'GENERAL';
+type ProductType = 'WATCH' | 'TV' | 'AUDIO' | 'PERIPHERAL' | 'NOTEBOOK' | 'KITCHEN' | 'SMARTPHONE' | 'MOBILITY' | 'GENERAL';
 
 // Identifica a plataforma de e-commerce pelo link
 function detectStore(urlOrText: string): string {
-  if (/amazon\.com(\.br)?|amzn\.to|a\.co/i.test(urlOrText)) return 'Amazon Brasil';
+  if (/amazon\.com(\.br)?|amzn\.to|(^|https?:\/\/|\.)a\.co(\/|$)/i.test(urlOrText)) return 'Amazon Brasil';
   if (/mercadolivre\.com(\.br)?|meli\.la|produto\.mercadolivre/i.test(urlOrText)) return 'Mercado Livre';
-  if (/shopee\.com(\.br)?|s\.shopee\.com\.br/i.test(urlOrText)) return 'Shopee Oficial';
+  if (/shopee\.com(\.br)?|s\.shopee/i.test(urlOrText)) return 'Shopee Oficial';
   if (/magazineluiza\.com(\.br)?|magazinevoce\.com\.br|magalu\.me|magalu/i.test(urlOrText)) return 'Magazine Luiza';
   if (/aliexpress\.com/i.test(urlOrText)) return 'AliExpress';
   if (/kabum\.com(\.br)?/i.test(urlOrText)) return 'KaBuM!';
@@ -53,8 +53,8 @@ function cleanProductTitle(raw: string): string {
     .replace(/&gt;/g, '>')
     .trim();
 
-  // Se for tela de verificação de segurança (Cloudflare, Magalu, Amazon robot check), ignora totalmente
-  if (/verificação rápida|acessou nosso site|segurança precisamos|navegação segura|proteger seus dados|etapa simples e rápida|robot check|captcha|cloudflare|access denied|algo deu errado|404|login/i.test(text)) {
+  // Se for tela de verificação de segurança (Cloudflare, ML verification, Magalu, Amazon robot check) ou nome puro de marketplace, descarta totalmente
+  if (/verificação|acessou nosso site|segurança|navegação segura|proteger seus dados|etapa simples e rápida|robot check|captcha|cloudflare|access denied|algo deu errado|404|login|^mercado\s*li[bv]re|^shopee(\s*brasil)?$|^amazon(\.com\.br)?|serviço indisponível|não é possível acessar/i.test(text.trim())) {
     return '';
   }
 
@@ -68,7 +68,7 @@ function cleanProductTitle(raw: string): string {
     // Padrões de lojas personalizadas de afiliados
     if (/^(loja\s+(do|da|de)?\s*[a-z0-9_ -]+|vitrine\s+[a-z0-9_ -]+|espa[cç]o\s+[a-z0-9_ -]+|achados\s+(do|da|de)?\s*[a-z0-9_ -]+)$/i.test(seg)) return false;
     // Grandes plataformas no título
-    if (/^(amazon(\.com\.br)?|mercado\s*livre|shopee(\s*brasil)?|aliexpress|kabum!?|casas\s*bahia|americanas|submarino)$/i.test(seg)) return false;
+    if (/^(amazon(\.com\.br)?|mercado\s*li[bv]re|shopee(\s*brasil)?|aliexpress|kabum!?|casas\s*bahia|americanas|submarino)$/i.test(seg)) return false;
     // Slogans de venda genéricos
     if (/^(compre online|frete gr[aá]tis|em promo[cç][aã]o|melhor pre[cç]o|ofertas? da semana|loja oficial|oferta imperd[ií]vel)$/i.test(seg)) return false;
     // Erros e bots
@@ -81,8 +81,8 @@ function cleanProductTitle(raw: string): string {
     const bestSegment = filtered.sort((a, b) => {
       const aWords = a.split(/\s+/).length;
       const bWords = b.split(/\s+/).length;
-      const aKeywords = /rel[oó]gio|smartwatch|watch|tv|fone|teclado|celular|air fryer|soundbar|aspirador/i.test(a) ? 3 : 0;
-      const bKeywords = /rel[oó]gio|smartwatch|watch|tv|fone|teclado|celular|air fryer|soundbar|aspirador/i.test(b) ? 3 : 0;
+      const aKeywords = /rel[oó]gio|smartwatch|watch|tv|fone|teclado|celular|air fryer|bicicleta|bike|scooter|soundbar|aspirador/i.test(a) ? 3 : 0;
+      const bKeywords = /rel[oó]gio|smartwatch|watch|tv|fone|teclado|celular|air fryer|bicicleta|bike|scooter|soundbar|aspirador/i.test(b) ? 3 : 0;
       return (bWords + bKeywords) - (aWords + aKeywords);
     })[0];
 
@@ -94,10 +94,15 @@ function cleanProductTitle(raw: string): string {
   }
 
   // Fallback se não sobrou nenhum segmento: limpa prefixos da string completa
-  return text
+  const cleanedFull = text
     .replace(/^(magazine\s+[a-z0-9_-]+|loja\s+[a-z0-9_-]+)\s*[|\-:]\s*/gi, '')
-    .replace(/\s*[|\-:]\s*(magazine\s+[a-z0-9_-]+|amazon|mercado\s*livre|shopee|kabum).*$/gi, '')
+    .replace(/\s*[|\-:]\s*(magazine\s+[a-z0-9_-]+|amazon|mercado\s*li[bv]re|shopee|kabum).*$/gi, '')
     .trim();
+
+  if (/^(mercado\s*li[bv]re|shopee(\s*brasil)?|amazon|magalu|magazine\s*luiza)$/i.test(cleanedFull)) {
+    return '';
+  }
+  return cleanedFull;
 }
 
 // Formata o slug limpo em título capitalizado em português
@@ -116,6 +121,8 @@ function formatSlugAsTitle(slug: string): string {
       if (/^fones?$/i.test(lower)) return 'Fone';
       if (/^ruido$/i.test(lower)) return 'Ruído';
       if (/^televisao$/i.test(lower)) return 'Televisão';
+      if (/^bicicleta$/i.test(lower)) return 'Bicicleta';
+      if (/^dobravel$/i.test(lower)) return 'Dobrável';
       return lower.charAt(0).toUpperCase() + lower.slice(1);
     })
     .join(' ')
@@ -123,10 +130,24 @@ function formatSlugAsTitle(slug: string): string {
     .replace(/\s+a\s+agua/gi, ' à Água');
 }
 
-// Extrai tokens e nome legível do produto a partir de URLs ignorando lojas de afiliados
+// Extrai tokens e nome legível do produto a partir de URLs ignorando lojas de afiliados e encurtadores
 function extractSlugWords(url: string): string {
   try {
     const parsed = new URL(url);
+
+    // Se o host for encurtador de afiliados conhecido, NUNCA usa o token hash como nome do produto!
+    if (/^(s\.shopee|amzn\.to|a\.co|meli\.la|magalu\.me|bit\.ly|tinyurl\.com|t\.co|goo\.gl|cutt\.ly|linktr\.ee)$/i.test(parsed.hostname)) {
+      return '';
+    }
+
+    // Se for URL com redirecionamento de verificação do Mercado Livre (?go=...)
+    if (parsed.searchParams.has('go')) {
+      const goParam = decodeURIComponent(parsed.searchParams.get('go') || '');
+      if (/^https?:\/\//i.test(goParam)) {
+        return extractSlugWords(goParam);
+      }
+    }
+
     const pathParts = parsed.pathname.split('/').filter(Boolean);
 
     // Segmentos a ignorar (nomes de lojas de afiliados, diretórios do sistema e identificadores)
@@ -134,10 +155,12 @@ function extractSlugWords(url: string): string {
       // Ignora diretórios comuns de lojas afiliadas (ex: /magazineminhaloja/)
       if (/^magazine[a-z0-9_-]*$/i.test(part)) return false;
       if (/^(shop|store|loja|vitrine|afiliado[s]?|afiliada[s]?|parceiro[s]?|vendedor|seller|user|perfil|u)$/i.test(part)) return false;
-      // Ignora rotas de sistema
-      if (/^(dp|gp|product|produto|produtos|item|itens|p|sec|s|b|c|d|br|pt)$/i.test(part)) return false;
+      // Ignora rotas de sistema e de verificação
+      if (/^(dp|gp|product|produto|produtos|item|itens|p|sec|s|b|c|d|br|pt|opaanlp|gz|account-verification|verify)$/i.test(part)) return false;
       // Ignora hashes, códigos hexadecimais ou IDs numéricos (ex: 1234567, MLB123456)
       if (/^(MLB[0-9]+|[0-9a-f]{8,}|[0-9]{4,})$/i.test(part)) return false;
+      // Rejeita tokens alfanuméricos sem separadores (hífen, underline, espaço) com menos de 18 caracteres (hashes de curto link)
+      if (!/[-_+% ]/.test(part) && part.length < 18) return false;
       return true;
     });
 
@@ -147,13 +170,15 @@ function extractSlugWords(url: string): string {
     const bestPart = candidates.sort((a, b) => {
       const aWordCount = a.split(/[-_+]/).length;
       const bWordCount = b.split(/[-_+]/).length;
-      const aHasKeywords = /rel[oó]gio|smartwatch|watch|tv|fone|teclado|celular|airfryer|fritadeira/i.test(a) ? 2 : 0;
-      const bHasKeywords = /rel[oó]gio|smartwatch|watch|tv|fone|teclado|celular|airfryer|fritadeira/i.test(b) ? 2 : 0;
+      const aHasKeywords = /rel[oó]gio|smartwatch|watch|tv|fone|teclado|celular|airfryer|fritadeira|bicicleta|bike|scooter/i.test(a) ? 3 : 0;
+      const bHasKeywords = /rel[oó]gio|smartwatch|watch|tv|fone|teclado|celular|airfryer|fritadeira|bicicleta|bike|scooter/i.test(b) ? 3 : 0;
       return (bWordCount + bHasKeywords) - (aWordCount + aHasKeywords);
     })[0];
 
     if (bestPart) {
       const cleaned = decodeURIComponent(bestPart)
+        .replace(/^MLB[-_]?[0-9]+[-_]?/i, '') // Remove código MLB-123456
+        .replace(/[-_]JM$/i, '') // Remove sufixo _JM
         .replace(/[-_+]/g, ' ')
         .replace(/[0-9a-f]{8,}/gi, '')
         .trim();
@@ -238,25 +263,51 @@ async function scrapeUrlMetadata(targetUrl: string) {
   let slugTitle = extractSlugWords(targetUrl);
   let extractedSnippet = '';
 
+  const isShopee = /shopee\.com(\.br)?|s\.shopee/i.test(targetUrl);
+
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 7000);
+    const timeout = setTimeout(() => controller.abort(), 4000);
+
+    const headers: Record<string, string> = isShopee
+      ? {
+          'User-Agent': 'WhatsApp/2.21.12.21 A',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8'
+        }
+      : {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8',
+          'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124"',
+          'sec-ch-ua-mobile': '?0',
+          'sec-ch-ua-platform': '"Windows"'
+        };
 
     const res = await fetch(targetUrl, {
       signal: controller.signal,
       redirect: 'follow',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8',
-        'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"Windows"'
-      }
+      headers
     });
 
     clearTimeout(timeout);
     resolvedUrl = res.url || targetUrl;
+
+    // Se o Mercado Livre redirecionou para account-verification, recupera a URL de destino pelo parâmetro ?go=
+    if (resolvedUrl.includes('account-verification') && resolvedUrl.includes('go=')) {
+      try {
+        const u = new URL(resolvedUrl);
+        const goTarget = u.searchParams.get('go');
+        if (goTarget) {
+          resolvedUrl = decodeURIComponent(goTarget);
+          if (!slugTitle) {
+            slugTitle = extractSlugWords(resolvedUrl);
+          }
+        }
+      } catch {
+        resolvedUrl = targetUrl;
+      }
+    }
 
     if (!slugTitle) {
       slugTitle = extractSlugWords(resolvedUrl);
@@ -446,7 +497,7 @@ async function scrapeUrlMetadata(targetUrl: string) {
       if (h1Match && h1Match[1]) {
         const rawH1 = h1Match[1].replace(/<[^>]+>/g, '').trim();
         const cleanedH1 = cleanProductTitle(rawH1);
-        if (cleanedH1 && cleanedH1.length > 5 && !/algo deu errado|n[aã]o encontrado|404|login/i.test(cleanedH1)) {
+        if (cleanedH1 && cleanedH1.length > 5 && !/algo deu errado|n[aã]o encontrado|404|login|robot check|mercado\s*li[bv]re/i.test(cleanedH1)) {
           pageTitle = cleanedH1;
         }
       }
@@ -458,7 +509,7 @@ async function scrapeUrlMetadata(targetUrl: string) {
         || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
       if (ogTitleMatch && ogTitleMatch[1]) {
         const cleanedOg = cleanProductTitle(ogTitleMatch[1]);
-        if (cleanedOg && cleanedOg.length > 5 && !/algo deu errado|n[aã]o encontrado|robot check/i.test(cleanedOg)) {
+        if (cleanedOg && cleanedOg.length > 5 && !/algo deu errado|n[aã]o encontrado|robot check|mercado\s*li[bv]re/i.test(cleanedOg)) {
           pageTitle = cleanedOg;
         }
       }
@@ -469,10 +520,15 @@ async function scrapeUrlMetadata(targetUrl: string) {
       const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
       if (titleMatch && titleMatch[1]) {
         const cleanedTitle = cleanProductTitle(titleMatch[1]);
-        if (cleanedTitle && cleanedTitle.length > 5 && !/algo deu errado|n[aã]o encontrado|robot check|404/i.test(cleanedTitle)) {
+        if (cleanedTitle && cleanedTitle.length > 5 && !/algo deu errado|n[aã]o encontrado|robot check|404|mercado\s*li[bv]re/i.test(cleanedTitle)) {
           pageTitle = cleanedTitle;
         }
       }
+    }
+
+    // Se o resultado final for tela de verificação ou login, descarta o título falso
+    if (resolvedUrl.includes('account-verification') || resolvedUrl.includes('/login') || /^(mercado\s*li[bv]re|acesse sua conta)/i.test(pageTitle)) {
+      pageTitle = '';
     }
 
     // Extrai og:description
@@ -501,7 +557,7 @@ async function scrapeUrlMetadata(targetUrl: string) {
     if (specsBlockMatch) {
       extractedSnippet = specsBlockMatch[0].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1500);
     } else if (metaDescription) {
-      extractedSnippet = metaDescription.slice(0, 500);
+      extractedSnippet = metaDescription.slice(0, 1500);
     }
   } catch (scrapeErr) {
     // Timeout ou erro de conexão tolerado
@@ -522,6 +578,11 @@ async function scrapeUrlMetadata(targetUrl: string) {
 // Classificador inteligente de nicho do produto
 function classifyProduct(allText: string): ProductType {
   const t = allText.toLowerCase();
+
+  // Mobilidade Urbana, Bicicletas e Veículos Elétricos
+  if (/\b(bicicleta|bike|bici|patinete|scooter|e-bike|ebike|monociclo|hoverboard|moto el[eé]trica|cavalos?|tripulado|pedal|ciclismo)\b/i.test(t)) {
+    return 'MOBILITY';
+  }
 
   // Relógios e Smartwatches (prioridade máxima se contiver palavras de relógio)
   if (/\b(rel[oó]gio|smartwatch|smart[ -]?band|watch|pulso|cron[oó]grafo|inviolavel|technos|casio|amazfit|galaxy watch|apple watch|g-shock|invicta|mormaii|mi band|garmin|fitbit|smart watch)\b/i.test(t)) {
@@ -571,6 +632,72 @@ function generateSlug(text: string): string {
 }
 
 // Geradores Especializados por Nicho
+function buildMobilityData(titleHint: string, store: string, ogImage?: string, priceHint?: string, originalPriceHint?: string, snippetHint?: string) {
+  const cleanTitle = (titleHint && titleHint.length > 5 && !/^(magazine|loja|afiliad)/i.test(titleHint))
+    ? titleHint.charAt(0).toUpperCase() + titleHint.slice(1)
+    : 'Bicicleta Elétrica Dobrável com Bateria de Lítio e Motor Potente';
+
+  const slug = generateSlug(cleanTitle) || 'bicicleta-eletrica-dobravel';
+  const priceCurrent = priceHint || 'R$ 1.899,00';
+  const priceOriginal = originalPriceHint || 'R$ 2.499,00';
+  const autoDiscount = calculateDiscountHelper(priceCurrent, priceOriginal);
+
+  // Extrai potência, voltagem e características técnicas do snippet se existirem
+  const potMatch = snippetHint?.match(/(\d{3,4}\s*W)/i);
+  const voltMatch = snippetHint?.match(/(\d{2,3}\s*V)/i);
+  const autoMatch = snippetHint?.match(/(\d{2}[-–]\d{2}\s*km|\d{2}\s*km)/i);
+  const pneuMatch = snippetHint?.match(/(\d{2}\s*polegadas|\d{2}")/i);
+  const velMatch = snippetHint?.match(/(?:velocidade\s*(?:m[áa]xima)?|at[ée])\s*(\d{2}\s*km\/h)/i);
+
+  const motorPower = potMatch ? potMatch[1] : '400W de alta eficiência';
+  const batteryVoltage = voltMatch ? `${voltMatch[1]} Bateria de Lítio Removível` : '48V Bateria de Lítio Removível';
+  const autonomy = autoMatch ? `${autoMatch[1]} por carga completa` : '20 a 30 km por carga completa';
+  const wheels = pneuMatch ? `${pneuMatch[1]} a vácuo antiderrapantes` : 'Pneus aro 14" antiderrapantes e anti-furo';
+  const maxSpeed = velMatch ? velMatch[1] : '25 km/h';
+
+  return {
+    title: cleanTitle,
+    slug,
+    subtitle: 'Análise detalhada de motor elétrico, autonomia da bateria de lítio, sistema dobrável e segurança no trânsito urbano.',
+    category: 'Mobilidade & Esportes',
+    coverImage: ogImage || '/src/assets/images/hero_tech_showcase_1792355762010.jpg',
+    partnerStore: store,
+    priceCurrent,
+    priceOriginal,
+    discountPercent: autoDiscount?.label || '',
+    pros: [
+      'Estrutura dobrável ultra compacta que facilita o transporte no porta-malas ou armazenamento em apartamentos',
+      `Motor elétrico eficiente de ${motorPower} com aceleração progressiva e velocidade de até ${maxSpeed}`,
+      `Bateria de lítio removível com autonomia de ${autonomy}, ideal para percursos de trabalho e estudos`,
+      'Freios a disco mecânico duplo (dianteiro e traseiro) que oferecem frenagem firme em qualquer tipo de piso'
+    ],
+    cons: [
+      'Subidas muito acentuadas podem requerer pedal assistido conjunto para manter velocidade constante',
+      'Tempo de carregamento completo da bateria leva em média de 4 a 6 horas em tomada comum'
+    ],
+    specifications: [
+      { label: 'Motor e Potência', value: motorPower },
+      { label: 'Bateria e Alimentação', value: `${batteryVoltage} (Bivolt 110V/220V)` },
+      { label: 'Autonomia Estimada', value: autonomy },
+      { label: 'Velocidade Máxima', value: `Até ${maxSpeed} com piloto automático/seletor` },
+      { label: 'Rodas e Pneus', value: wheels },
+      { label: 'Sistema de Frenagem', value: 'Freios a disco duplo (dianteiro e traseiro)' },
+      { label: 'Capacidade de Carga', value: 'Suporta até 150 kg com estabilidade' },
+      { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
+    ],
+    content: `### Design Dobrável, Materiais e Construção\n\nA bicicleta elétrica apresenta quadro reforçado em aço com trava de engate rápido que dispensa ferramentas para dobrar. Ocupa espaço reduzido, ideal para quem mora em apartamento, condomínio ou precisa colocar o veículo no porta-malas do carro.\n\n### Desempenho do Motor, Bateria Removível e Autonomia Urbana\n\nO motor de ${motorPower} oferece arrancadas ágeis e torque suficiente para o trânsito da cidade. O grande destaque prático é a bateria removível: você pode destravá-la com a chave e levá-la para carregar em qualquer tomada de casa ou do trabalho sem precisar transportar a bike toda.\n\n### Segurança, Iluminação Noturna e Veredito\n\nConta com farol dianteiro em LED de alta intensidade, refletores de sinalização traseiros e buzina integrada. A economia gerada no transporte urbano diário frente aos gastos com combustível ou passagens torna este investimento extremamente vantajoso.`,
+    verdict: 'Uma solução excelente de mobilidade urbana prática, econômica e sustentável. Destaca-se pela bateria removível, freios a disco duplos e facilidade para guardar dobrada.',
+    scoreCostBenefit: 4.9,
+    scorePerformance: 4.8,
+    scoreBuild: 4.8,
+    scoreUsability: 4.9,
+    faqs: [
+      { question: 'A bateria pode ser removida para carregar separadamente?', answer: 'Sim, a bateria conta com chave de segurança própria e pode ser retirada facilmente para carregar em qualquer tomada 110V ou 220V.' },
+      { question: 'É possível pedalar normalmente se a bateria descarregar?', answer: 'Sim, a bicicleta possui pedais mecânicos funcionais com pedivela normal, funcionando como uma bicicleta tradicional caso acabe a carga.' },
+      { question: 'Pode ser utilizada em dias de chuva?', answer: 'Sim, a fiação e os módulos elétricos contam com vedação resistente a respingos e chuvas urbanas.' }
+    ]
+  };
+}
 function buildWatchData(titleHint: string, store: string, ogImage?: string, priceHint?: string, originalPriceHint?: string) {
   const cleanTitle = (titleHint && titleHint.length > 5 && !/^(magazine|loja|afiliad)/i.test(titleHint))
     ? titleHint.charAt(0).toUpperCase() + titleHint.slice(1)
@@ -1043,8 +1170,9 @@ app.post('/api/analyze-product', async (req: Request, res: Response) => {
     }
 
     // Se o titleHint estiver vazio ou for nome de loja, usa padrão pelo nicho
-    if (!titleHint || /^(magazine|loja|vitrine|espa[cç]o)\s+[a-z0-9_-]+/i.test(titleHint)) {
-      if (productType === 'WATCH') titleHint = 'Relógio Inteligente Smartwatch com Tela AMOLED e Monitor Cardíaco';
+    if (!titleHint || /^(magazine|loja|vitrine|espa[cç]o)\s+[a-z0-9_-]+/i.test(titleHint) || /^(mercado\s*li[bv]re|shopee|amazon)/i.test(titleHint)) {
+      if (productType === 'MOBILITY') titleHint = 'Bicicleta Elétrica Dobrável com Bateria de Lítio e Motor Potente';
+      else if (productType === 'WATCH') titleHint = 'Relógio Inteligente Smartwatch com Tela AMOLED e Monitor Cardíaco';
       else if (productType === 'TV') titleHint = 'Smart TV 50 Polegadas 4K UHD com HDR10+';
       else if (productType === 'AUDIO') titleHint = 'Fone de Ouvido Sem Fio com Cancelamento Ativo de Ruído';
       else if (productType === 'NOTEBOOK') titleHint = 'Notebook de Alta Produtividade com SSD NVMe e Tela Full HD';
@@ -1057,7 +1185,9 @@ app.post('/api/analyze-product', async (req: Request, res: Response) => {
     // 4. Se tiver chave Gemini, tenta enriquecer mantendo a categoria estrita e dados limpos
     if (apiKey) {
       try {
-        const categoryInstruction = productType === 'WATCH' 
+        const categoryInstruction = productType === 'MOBILITY'
+          ? 'ESTE PRODUTO É UMA BICICLETA ELÉTRICA / MOBILIDADE URBANA (bike, patinete, scooter). As especificações DEVEM ser de mobilidade elétrica (potência do motor em Watts, voltagem e capacidade da bateria de lítio, autonomia em km, aro/pneus, sistema de freios a disco duplo, velocidade máxima em km/h, peso suportado em kg).'
+          : productType === 'WATCH' 
           ? 'ESTE PRODUTO É RIGOROSAMENTE UM RELÓGIO / SMARTWATCH. As especificações DEVEM ser de relógio (tela AMOLED/IPS, autonomia em dias, resistência à água 5 ATM/IP68, sensores de saúde, pulseira).'
           : productType === 'TV'
           ? 'ESTE PRODUTO É UMA SMART TV. Gere especificações reais de TV (resolução 4K UHD, polegadas, taxa Hz, sistema operacional, conexões HDMI 2.1, potência de áudio).'
@@ -1088,7 +1218,7 @@ DIRETRIZES DE CATEGORIA:
 ${categoryInstruction}
 
 REGRAS DE CONTEÚDO TÉCNICO VERDADEIRO (CRÍTICO):
-1. O "title" DEVE ser o NOME REAL E COMPLETO DO PRODUTO (ex: "Notebook Acer Aspire 5 A515-57-55B8 Intel Core i5 8GB 256GB SSD" ou "Relógio Smartwatch D20 Bluetooth"). NUNCA coloque nomes de lojas de afiliados como "Magazine Fulano", "Loja do João", "Achados".
+1. O "title" DEVE ser o NOME REAL E COMPLETO DO PRODUTO (ex: "Bicicleta Elétrica Dobrável 9Cavalo 400W 48V" ou "Relógio Smartwatch D20 Bluetooth"). NUNCA coloque nomes de lojas de afiliados como "Magazine Fulano", "Loja do João", "Achados".
 2. NUNCA use termos em inglês soltos ("OFF", "Setup", "Gadgets", "Wireless", "Features"). Use termos naturais em português do Brasil.
 3. FICHA TÉCNICA VERDADEIRA ("specifications"): Deve conter entre 5 e 8 especificações de engenharia e componentes REAIS deste modelo exato:
    - PROIBIÇÃO RIGOROSA: NUNCA gere itens genéricos de inventário como "Condição: Novo original na caixa lacrada", "Disponibilidade: Pronta entrega com garantia oficial", "Embalagem: Caixa". Isso arruína a credibilidade do site. Forneça APENAS dados técnicos do produto (Processador, Memória, Tela, Bateria, Potência, Dimensões, Sensores, etc.)!
@@ -1114,6 +1244,7 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido:
   "slug": "url-amigavel-do-produto",
   "subtitle": "Subtítulo explicativo com principal benefício técnico",
   "category": "${
+    productType === 'MOBILITY' ? 'Mobilidade & Esportes' :
     productType === 'WATCH' ? 'Relógios & Smartwatches' :
     productType === 'TV' ? 'Tecnologia & Dispositivos' :
     productType === 'AUDIO' ? 'Áudio & Fones' :
@@ -1155,12 +1286,13 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido:
           contents: prompt,
           config: {
             responseMimeType: 'application/json',
-            temperature: 0.2
+            temperature: 0.2,
+            maxOutputTokens: 1800
           }
         });
 
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout Gemini')), 25000)
+          setTimeout(() => reject(new Error('Timeout Gemini')), 7000)
         );
 
         const response: any = await Promise.race([geminiPromise, timeoutPromise]);
@@ -1219,7 +1351,9 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido:
 
     // 5. Gerador Especializado Garantido por Nicho (quando Gemini não responde ou falha)
     let finalData;
-    if (productType === 'WATCH') {
+    if (productType === 'MOBILITY') {
+      finalData = buildMobilityData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice, extractedSnippet);
+    } else if (productType === 'WATCH') {
       finalData = buildWatchData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice);
     } else if (productType === 'TV') {
       finalData = buildTvData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice);
@@ -1309,12 +1443,13 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido:
           contents: prompt,
           config: {
             responseMimeType: 'application/json',
-            temperature: 0.2
+            temperature: 0.2,
+            maxOutputTokens: 1800
           }
         });
 
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout Gemini')), 25000)
+          setTimeout(() => reject(new Error('Timeout Gemini')), 7000)
         );
 
         const response: any = await Promise.race([geminiPromise, timeoutPromise]);
@@ -1337,7 +1472,8 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido:
 
     // Fallback inteligente garantido por nicho
     let fallbackData;
-    if (productType === 'NOTEBOOK') fallbackData = buildNotebookData(cleanTitle, 'Loja Oficial');
+    if (productType === 'MOBILITY') fallbackData = buildMobilityData(cleanTitle, 'Loja Oficial');
+    else if (productType === 'NOTEBOOK') fallbackData = buildNotebookData(cleanTitle, 'Loja Oficial');
     else if (productType === 'SMARTPHONE') fallbackData = buildSmartphoneData(cleanTitle, 'Loja Oficial');
     else if (productType === 'WATCH') fallbackData = buildWatchData(cleanTitle, 'Loja Oficial');
     else if (productType === 'TV') fallbackData = buildTvData(cleanTitle, 'Loja Oficial');
