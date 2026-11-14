@@ -26,7 +26,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   const clickCountRef = useRef(0);
   const clickTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const handleBrandClick = () => {
+  const handleBrandClick = (e: React.MouseEvent) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
     clickCountRef.current += 1;
     if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
 
@@ -41,12 +43,20 @@ export const Navbar: React.FC<NavbarProps> = ({
     }
   };
 
+  const handleSpaLink = (e: React.MouseEvent, action: () => void) => {
+    if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      action();
+    }
+  };
+
   return (
     <header className="sticky top-0 z-40 bg-[#0B132B]/95 backdrop-blur-md border-b border-slate-800 text-white transition-all select-none">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-8">
         
         {/* Zone 1: Marca do Site (Triple-click secreto para acesso do gestor) */}
-        <button
+        <a
+          href="/"
           onClick={handleBrandClick}
           title="Achados & Reviews"
           className="text-xl font-bold tracking-tight text-white hover:text-cyan-300 transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 focus:outline-none cursor-pointer"
@@ -54,12 +64,13 @@ export const Navbar: React.FC<NavbarProps> = ({
           <span>Achados</span>
           <span className="text-[#FF6B00]">&amp;</span>
           <span className="text-[#00E5FF]">Reviews</span>
-        </button>
+        </a>
 
-        {/* Zone 2: Links de Navegação Dinâmicos das Categorias (100% funcionais) */}
-        <nav className="hidden md:flex items-center gap-7 text-sm font-medium text-slate-300">
-          <button
-            onClick={() => onSelectCategory('all')}
+        {/* Zone 2: Links de Navegação Dinâmicos das Categorias (Crawláveis para SEO) */}
+        <nav aria-label="Navegação Principal" className="hidden md:flex items-center gap-7 text-sm font-medium text-slate-300">
+          <a
+            href="/"
+            onClick={(e) => handleSpaLink(e, () => onSelectCategory('all'))}
             className={`hover:text-cyan-400 transition-colors whitespace-nowrap shrink-0 pb-0.5 cursor-pointer ${
               (activeCategory === 'all' || !activeCategory) && !isGuidesActive
                 ? 'text-cyan-400 font-semibold border-b-2 border-cyan-400'
@@ -67,11 +78,12 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             Início
-          </button>
+          </a>
 
           {onGoGuides && (
-            <button
-              onClick={onGoGuides}
+            <a
+              href="/#guias-comparativos"
+              onClick={(e) => handleSpaLink(e, onGoGuides)}
               className={`hover:text-emerald-400 transition-colors whitespace-nowrap shrink-0 pb-0.5 cursor-pointer flex items-center gap-1 ${
                 isGuidesActive
                   ? 'text-emerald-400 font-semibold border-b-2 border-emerald-400'
@@ -80,15 +92,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               <span>Comparativos &amp; Guias</span>
-            </button>
+            </a>
           )}
 
           {categories.slice(0, 4).map((cat) => {
             const isSelected = activeCategory === cat.name;
             return (
-              <button
+              <a
                 key={cat.id}
-                onClick={() => onSelectCategory(cat.name)}
+                href={`/categoria/${cat.slug}`}
+                onClick={(e) => handleSpaLink(e, () => onSelectCategory(cat.name))}
                 className={`hover:text-cyan-400 transition-colors whitespace-nowrap shrink-0 pb-0.5 ${
                   isSelected
                     ? 'text-cyan-400 font-semibold border-b-2 border-cyan-400'
@@ -96,7 +109,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }`}
               >
                 {cat.name}
-              </button>
+              </a>
             );
           })}
         </nav>

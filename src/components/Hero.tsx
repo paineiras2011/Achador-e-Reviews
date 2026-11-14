@@ -169,7 +169,18 @@ export const Hero: React.FC<HeroProps> = ({
 
             {/* Product Title */}
             <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight text-white leading-tight">
-              {current.title}
+              <a
+                href={`/reviews/${current.slug}`}
+                onClick={(e) => {
+                  if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+                    e.preventDefault();
+                    onReadReview(current.slug);
+                  }
+                }}
+                className="hover:text-cyan-300 transition-colors"
+              >
+                {current.title}
+              </a>
             </h1>
 
             {/* Subtitle / Description */}
@@ -202,14 +213,19 @@ export const Hero: React.FC<HeroProps> = ({
 
             {/* Actions */}
             <div className="pt-3 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={() => onReadReview(current.slug)}
+              <a
+                href={`/reviews/${current.slug}`}
+                onClick={(e) => {
+                  if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+                    e.preventDefault();
+                    onReadReview(current.slug);
+                  }
+                }}
                 className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-medium text-xs sm:text-sm rounded-lg transition-colors flex items-center gap-2 border border-slate-700"
               >
                 <span>Ler Análise Completa</span>
                 <ArrowRight className="w-4 h-4 text-cyan-400" />
-              </button>
+              </a>
 
               <a
                 href={current.affiliateUrl}

@@ -1,18 +1,28 @@
 import React from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { SiteSettings, Category } from '../types';
+import type { InfoPageType } from './InfoPage';
 
 interface FooterProps {
   settings?: SiteSettings;
   categories: Category[];
   onSelectCategory: (categoryName: string) => void;
+  onSelectInfoPage?: (page: InfoPageType) => void;
 }
 
 export const Footer: React.FC<FooterProps> = ({
   settings,
   categories,
-  onSelectCategory
+  onSelectCategory,
+  onSelectInfoPage
 }) => {
+  const handleLink = (e: React.MouseEvent, action: () => void) => {
+    if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      action();
+    }
+  };
+
   return (
     <footer className="bg-[#0B132B] text-slate-400 border-t border-slate-800 text-sm mt-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -30,7 +40,7 @@ export const Footer: React.FC<FooterProps> = ({
             </p>
           </div>
 
-          {/* Categorias Dinâmicas 100% Funcionais */}
+          {/* Categorias Dinâmicas Crawláveis */}
           <div>
             <h4 className="text-xs font-semibold text-slate-200 tracking-wider uppercase mb-3">
               Categorias em Destaque
@@ -38,21 +48,22 @@ export const Footer: React.FC<FooterProps> = ({
             <ul className="space-y-2 text-xs">
               {categories.map((cat) => (
                 <li key={cat.id}>
-                  <button
-                    onClick={() => onSelectCategory(cat.name)}
-                    className="hover:text-cyan-400 transition-colors text-left"
+                  <a
+                    href={`/categoria/${cat.slug}`}
+                    onClick={(e) => handleLink(e, () => onSelectCategory(cat.name))}
+                    className="hover:text-cyan-400 transition-colors text-left inline-block"
                   >
                     {cat.name}
-                  </button>
+                  </a>
                 </li>
               ))}
             </ul>
           </div>
 
-          {/* Garantia e Transparência */}
+          {/* Garantia, Transparência e Links E-E-A-T */}
           <div className="space-y-3">
             <h4 className="text-xs font-semibold text-slate-200 tracking-wider uppercase mb-3">
-              Segurança &amp; Confiabilidade
+              Institucional &amp; Confiabilidade
             </h4>
             <div className="space-y-2 text-xs text-slate-400">
               <div className="flex items-center gap-2">
@@ -61,9 +72,40 @@ export const Footer: React.FC<FooterProps> = ({
               </div>
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Preços e estoques sujeitos a alteração sem aviso prévio pelas lojas parceiras</span>
+                <span>Preços e estoques sujeitos a alteração pelas lojas parceiras</span>
               </div>
             </div>
+
+            <nav aria-label="Links Institucionais" className="pt-2 flex flex-wrap gap-x-4 gap-y-1.5 text-xs">
+              <a
+                href="/sobre"
+                onClick={(e) => onSelectInfoPage && handleLink(e, () => onSelectInfoPage('sobre'))}
+                className="text-slate-300 hover:text-cyan-400 transition-colors"
+              >
+                Sobre Nós
+              </a>
+              <a
+                href="/metodologia"
+                onClick={(e) => onSelectInfoPage && handleLink(e, () => onSelectInfoPage('metodologia'))}
+                className="text-slate-300 hover:text-cyan-400 transition-colors"
+              >
+                Metodologia
+              </a>
+              <a
+                href="/privacidade"
+                onClick={(e) => onSelectInfoPage && handleLink(e, () => onSelectInfoPage('privacidade'))}
+                className="text-slate-300 hover:text-cyan-400 transition-colors"
+              >
+                Privacidade
+              </a>
+              <a
+                href="/termos"
+                onClick={(e) => onSelectInfoPage && handleLink(e, () => onSelectInfoPage('termos'))}
+                className="text-slate-300 hover:text-cyan-400 transition-colors"
+              >
+                Termos de Uso
+              </a>
+            </nav>
           </div>
 
         </div>

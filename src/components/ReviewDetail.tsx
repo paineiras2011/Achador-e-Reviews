@@ -23,6 +23,8 @@ import {
 import { Review, Banner, ComparisonGuide } from '../types';
 import { AdBannerSlot } from './AdBannerSlot';
 import { cleanOtherStores } from '../utils/storeHelpers';
+import { calculateDiscount } from '../utils/priceHelpers';
+import type { InfoPageType } from './InfoPage';
 
 interface ReviewDetailProps {
   review: Review;
@@ -32,6 +34,8 @@ interface ReviewDetailProps {
   onBack: () => void;
   onReadReview: (slug: string) => void;
   onSelectGuide?: (slug: string) => void;
+  onSelectCategory?: (categoryName: string) => void;
+  onSelectInfoPage?: (page: InfoPageType) => void;
   onAffiliateClick: (review: Review, storeName?: string) => void;
 }
 
@@ -43,10 +47,29 @@ export const ReviewDetail: React.FC<ReviewDetailProps> = ({
   onBack,
   onReadReview,
   onSelectGuide,
+  onSelectCategory,
+  onSelectInfoPage,
   onAffiliateClick
 }) => {
   const [openFaqIndices, setOpenFaqIndices] = useState<number[]>([0]); // Open first FAQ by default
   const [shareSuccess, setShareSuccess] = useState(false);
+  const [couponCopied, setCouponCopied] = useState(false);
+
+  const discountInfo = calculateDiscount(review.priceCurrent, review.priceOriginal);
+
+  const handleSpaLink = (e: React.MouseEvent, action: () => void) => {
+    if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      action();
+    }
+  };
+
+  const handleCopyCoupon = () => {
+    if (!review.couponCode) return;
+    navigator.clipboard?.writeText(review.couponCode);
+    setCouponCopied(true);
+    setTimeout(() => setCouponCopied(false), 2500);
+  };
 
   // Encontra guia comparativo que mencione explicitamente este produto ou pertença à mesma categoria
   const matchingGuide = relatedGuides.find(g => 
@@ -88,23 +111,50 @@ export const ReviewDetail: React.FC<ReviewDetailProps> = ({
   };
 
   return (
-    <div className="bg-slate-50 min-h-screen py-8">
+    <div className="bg-slate-50 min-h-screen py-8 pb-24 md:pb-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
         {/* Top Breadcrumb & Navigation */}
-        <div className="flex items-center justify-between gap-4 mb-6 text-xs text-slate-500">
-          <button
-            onClick={onBack}
-            className="flex items-center gap-1.5 text-slate-600 hover:text-cyan-600 font-semibold transition-colors py-1 px-2.5 bg-white border border-slate-200 rounded-lg shadow-2xs"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Voltar ao Catálogo</span>
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-6 text-xs text-slate-500">
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href="/"
+              onClick={(e) => handleSpaLink(e, onBack)}
+              className="flex items-center gap-1.5 text-slate-600 hover:text-cyan-600 font-semibold transition-colors py-1 px-2.5 bg-white border border-slate-200 rounded-lg shadow-2xs"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Voltar ao Catálogo</span>
+            </a>
+
+            <nav aria-label="Breadcrumb" className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500">
+              <a
+                href="/"
+                onClick={(e) => handleSpaLink(e, onBack)}
+                className="hover:text-cyan-600 transition-colors"
+              >
+                Início
+              </a>
+              <span>/</span>
+              {onSelectCategory ? (
+                <a
+                  href={`/?categoria=${encodeURIComponent(review.category)}`}
+                  onClick={(e) => handleSpaLink(e, () => onSelectCategory(review.category))}
+                  className="hover:text-cyan-600 transition-colors"
+                >
+                  {review.category}
+                </a>
+              ) : (
+                <span>{review.category}</span>
+              )}
+              <span>/</span>
+              <span className="text-slate-700 font-medium truncate max-w-[260px]">{review.title}</span>
+            </nav>
+          </div>
 
           <div className="flex items-center gap-2">
             <button
               onClick={handleShare}
-              className="flex items-center gap-1.5 py-1 px-2.5 bg-white border border-slate-200 rounded-lg text-slate-600 hover:text-slate-900 transition-colors shadow-2xs"
+              className="flex items-center gap-1.5 py-1 px-2.5 bg-white border border-slate-200 rounded-lg text-slate-600 hover:text-slate-900 transition-colors shadow-2xs cursor-pointer"
             >
               {shareSuccess ? (
                 <>
@@ -183,7 +233,7 @@ export const ReviewDetail: React.FC<ReviewDetailProps> = ({
                   <span className="text-xs text-slate-400">Excelente Avaliação</span>
                 </div>
 
-                <div className="flex items-baseline gap-3">
+                <div className="flex flex-wrap items-baseline gap-2.5">
                   <span className="text-3xl sm:text-4xl font-extrabold font-mono tabular-nums text-white">
                     {review.priceCurrent}
                   </span>
@@ -198,6 +248,32 @@ export const ReviewDetail: React.FC<ReviewDetailProps> = ({
                     </span>
                   )}
                 </div>
+                {discountInfo && discountInfo.savingsValue > 0 && (
+                  <div className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-300 bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-1 rounded-md">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Você economiza {discountInfo.savings} nesta oferta</span>
+                  </div>
+                )}
+                {review.couponCode && (
+                  <div className="flex items-center justify-between gap-2 bg-slate-900/80 border border-dashed border-amber-400/50 rounded-lg px-3 py-2">
+                    <div className="flex items-center gap-2 text-xs">
+                      <Tag className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span className="text-slate-300">Cupom:</span>
+                      <strong className="font-mono text-amber-300 tracking-wide">{review.couponCode}</strong>
+                      {review.couponDiscount && (
+                        <span className="text-3xs text-slate-400 hidden sm:inline">({review.couponDiscount})</span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopyCoupon}
+                      className="inline-flex items-center gap-1 text-2xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 px-2 py-1 rounded transition-colors cursor-pointer shrink-0"
+                    >
+                      {couponCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                      <span>{couponCopied ? 'Copiado!' : 'Copiar'}</span>
+                    </button>
+                  </div>
+                )}
                 <p className="text-2xs text-slate-400 font-medium mt-1 flex items-center gap-1.5">
                   <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
                   <span>* Preço sujeito a alteração pela loja parceira sem aviso prévio</span>
@@ -427,14 +503,15 @@ export const ReviewDetail: React.FC<ReviewDetailProps> = ({
                   </p>
 
                   <div className="pt-2 flex flex-wrap items-center gap-3">
-                    <button
-                      onClick={() => onSelectGuide(matchingGuide.slug)}
+                    <a
+                      href={`/guias/${matchingGuide.slug}`}
+                      onClick={(e) => handleSpaLink(e, () => onSelectGuide(matchingGuide.slug))}
                       className="inline-flex items-center gap-2 px-5 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs sm:text-sm rounded-xl transition-all shadow-md cursor-pointer hover:shadow-emerald-500/20"
                     >
                       <Trophy className="w-4 h-4 text-slate-950" />
                       <span>Ver Ranking e Comparativo Completo</span>
                       <ExternalLink className="w-4 h-4" />
-                    </button>
+                    </a>
                     
                     <a
                       href={review.affiliateUrl}
@@ -541,15 +618,17 @@ export const ReviewDetail: React.FC<ReviewDetailProps> = ({
                 
                 <div className="space-y-3">
                   {relatedReviews.map((rel) => (
-                    <div
+                    <a
                       key={rel.id}
-                      onClick={() => onReadReview(rel.slug)}
+                      href={`/reviews/${rel.slug}`}
+                      onClick={(e) => handleSpaLink(e, () => onReadReview(rel.slug))}
                       className="group flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer border border-transparent hover:border-slate-100"
                     >
                       <img
                         src={rel.coverImage}
                         alt={rel.title}
                         referrerPolicy="no-referrer"
+                        loading="lazy"
                         className="w-14 h-14 rounded-md object-cover border border-slate-200 shrink-0"
                       />
                       <div className="overflow-hidden space-y-0.5">
@@ -563,16 +642,57 @@ export const ReviewDetail: React.FC<ReviewDetailProps> = ({
                           </span>
                         </div>
                       </div>
-                    </div>
+                    </a>
                   ))}
                 </div>
               </div>
             )}
 
+            {/* E-E-A-T Editorial Transparency Card */}
+            <div className="bg-slate-100/80 rounded-2xl border border-slate-200 p-4 text-xs text-slate-600 space-y-2">
+              <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                <span>Análise Independente &amp; Verificada</span>
+              </div>
+              <p className="leading-relaxed text-2xs">
+                Avaliamos ficha técnica, custo-benefício e reputação do vendedor antes de recomendar qualquer oferta.
+              </p>
+              <a
+                href="/metodologia"
+                onClick={(e) => onSelectInfoPage && handleSpaLink(e, () => onSelectInfoPage('metodologia'))}
+                className="inline-block font-bold text-cyan-700 hover:text-cyan-800 underline text-2xs"
+              >
+                Conheça nossa metodologia editorial
+              </a>
+            </div>
+
           </div>
 
         </div>
 
+      </div>
+
+      {/* Mobile Sticky Bottom CTA Bar (Increases mobile affiliate CTR) */}
+      <div className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-[#0B132B]/95 backdrop-blur-md border-t border-slate-800 px-4 py-2.5 flex items-center justify-between gap-3 shadow-2xl">
+        <div className="min-w-0">
+          <div className="text-3xs text-slate-400 truncate">{review.partnerStore}</div>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-base font-extrabold font-mono text-white">{review.priceCurrent}</span>
+            {discountInfo && discountInfo.percent > 0 && (
+              <span className="text-3xs font-bold text-[#00E5FF]">-{discountInfo.percent}%</span>
+            )}
+          </div>
+        </div>
+        <a
+          href={review.affiliateUrl}
+          target="_blank"
+          rel="sponsored nofollow noopener noreferrer"
+          onClick={() => onAffiliateClick(review, review.partnerStore)}
+          className="px-4 py-2.5 bg-[#FF6B00] hover:bg-[#e05e00] text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 shrink-0 shadow-md"
+        >
+          <span>Ver Oferta</span>
+          <ExternalLink className="w-3.5 h-3.5" />
+        </a>
       </div>
     </div>
   );

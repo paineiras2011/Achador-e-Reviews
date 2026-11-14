@@ -49,46 +49,35 @@ export const GuideDetail: React.FC<GuideDetailProps> = ({ guide, onBack, onSelec
     }
   };
 
-  // Structured Data Schema for Search Engines (ItemList + Article)
-  const schemaData = {
-    "@context": "https://schema.org",
-    "@type": "ItemPage",
-    "name": guide.title,
-    "description": guide.subtitle || guide.introContent.slice(0, 160),
-    "datePublished": guide.createdAt,
-    "dateModified": guide.updatedAt || guide.createdAt,
-    "mainEntity": {
-      "@type": "ItemList",
-      "itemListElement": guide.products.map((p, index) => ({
-        "@type": "ListItem",
-        "position": index + 1,
-        "name": p.title,
-        "description": p.summary,
-        "image": p.imageUrl
-      }))
+  const handleSpaLink = (e: React.MouseEvent, action: () => void) => {
+    if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      action();
     }
   };
 
   return (
     <div className="min-h-screen bg-slate-50/50 pb-20">
-      {/* Schema.org JSON-LD Script Injection */}
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(schemaData) }}
-      />
-
       {/* Breadcrumb & Navigation Bar */}
       <div className="bg-white border-b border-slate-200/80 sticky top-16 z-30 shadow-xs">
-        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
-          <button
-            onClick={onBack}
-            className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-emerald-600 transition-colors cursor-pointer"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Voltar aos Comparativos</span>
-          </button>
+        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <a
+              href="/"
+              onClick={(e) => handleSpaLink(e, onBack)}
+              className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-emerald-600 transition-colors cursor-pointer shrink-0"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Voltar aos Comparativos</span>
+            </a>
 
-          <div className="flex items-center gap-2">
+            <nav aria-label="Breadcrumb" className="hidden md:flex items-center gap-1.5 text-xs text-slate-400 truncate">
+              <span>/</span>
+              <span className="text-slate-600 font-medium truncate">{guide.category}</span>
+            </nav>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={handleShare}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
@@ -216,13 +205,14 @@ export const GuideDetail: React.FC<GuideDetailProps> = ({ guide, onBack, onSelec
                       <td className="py-4 px-4 text-right">
                         <div className="flex items-center justify-end gap-2">
                           {prod.reviewSlug && onSelectReview && (
-                            <button
-                              onClick={() => onSelectReview(prod.reviewSlug!)}
+                            <a
+                              href={`/reviews/${prod.reviewSlug}`}
+                              onClick={(e) => handleSpaLink(e, () => onSelectReview(prod.reviewSlug!))}
                               title="Ler análise aprofundada individual"
                               className="px-2.5 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
                             >
                               Análise
-                            </button>
+                            </a>
                           )}
                           <a
                             href={prod.affiliateUrl}
@@ -321,13 +311,14 @@ export const GuideDetail: React.FC<GuideDetailProps> = ({ guide, onBack, onSelec
                       <div className="flex flex-col sm:flex-row gap-2.5">
                         {/* Bi-directional Link to Full Single Review */}
                         {prod.reviewSlug && onSelectReview && (
-                          <button
-                            onClick={() => onSelectReview(prod.reviewSlug!)}
+                          <a
+                            href={`/reviews/${prod.reviewSlug}`}
+                            onClick={(e) => handleSpaLink(e, () => onSelectReview(prod.reviewSlug!))}
                             className="inline-flex items-center justify-center gap-1.5 px-4 py-3 bg-white border border-slate-300 hover:border-slate-400 text-slate-800 text-xs sm:text-sm font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
                           >
                             <FileText className="w-4 h-4 text-slate-600" />
                             <span>Ler Análise Individual</span>
-                          </button>
+                          </a>
                         )}
 
                         {/* Direct Affiliate Buy CTA */}
@@ -467,13 +458,14 @@ export const GuideDetail: React.FC<GuideDetailProps> = ({ guide, onBack, onSelec
 
         {/* Bottom Back & Exploration Footer */}
         <div className="text-center pt-4">
-          <button
-            onClick={onBack}
+          <a
+            href="/"
+            onClick={(e) => handleSpaLink(e, onBack)}
             className="inline-flex items-center gap-2 px-6 py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-2xl shadow-md hover:shadow-lg transition-all cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>Voltar e Explorar Mais Análises</span>
-          </button>
+          </a>
         </div>
       </div>
     </div>

@@ -17,11 +17,16 @@ import {
   AlertTriangle,
   Eye,
   ExternalLink,
-  Store
+  Store,
+  Copy,
+  Check,
+  Share2,
+  RefreshCw
 } from 'lucide-react';
-import { Review, Category, Specification, FAQItem, PartnerOffer } from '../../types';
+import { Review, Category, Specification, FAQItem, PartnerOffer, PostKit } from '../../types';
 import { cleanOtherStores, isSameStore } from '../../utils/storeHelpers';
 import { calculateDiscount } from '../../utils/priceHelpers';
+import { buildClientPostKit, sanitizePostKit } from '../../utils/postKitHelpers';
 import { INITIAL_REVIEWS } from '../../data/initialData';
 
 interface ReviewEditorModalProps {
@@ -54,11 +59,14 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
   onSave,
   onDelete
 }) => {
-  const [activeTab, setActiveTab] = useState<'basic' | 'affiliate' | 'proscons' | 'specs' | 'content' | 'faqs'>('basic');
+  const [activeTab, setActiveTab] = useState<'basic' | 'affiliate' | 'proscons' | 'specs' | 'content' | 'faqs' | 'postkit'>('basic');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [imageLoadStatus, setImageLoadStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [postKit, setPostKit] = useState<PostKit | undefined>(undefined);
+  const [isGeneratingPostKit, setIsGeneratingPostKit] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Magic Autocomplete State
   const [magicInput, setMagicInput] = useState('');
@@ -175,46 +183,44 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
         setScoreUsability(reviewToEdit.scoreBreakdown.usability);
       }
       setFaqs(reviewToEdit.faqs && reviewToEdit.faqs.length > 0 ? reviewToEdit.faqs : [{ question: '', answer: '' }]);
+      setPostKit(sanitizePostKit(reviewToEdit.postKit));
+      setActiveTab('basic');
+      setEnrichSuccessMessage(null);
+      setMagicStatus(null);
+      setCopiedField(null);
     } else {
-      // New review defaults
+      // New review clean defaults (no generic filler text)
       const newId = `rev-${Date.now()}`;
       setId(newId);
       setTitle('');
       setSlug('');
       setSubtitle('');
       setCategory(categories[0]?.name || 'Tecnologia & Dispositivos');
-      setCoverImage(IMAGE_PRESETS[0].url);
+      setCoverImage(IMAGE_PRESETS[5].url);
       setRating(4.8);
       setFeatured(false);
-      setPriceCurrent('R$ 299,90');
-      setPriceOriginal('R$ 399,00');
-      setDiscountPercent('25% de desconto');
-      setAffiliateUrl('https://www.amazon.com.br/dp/EXAMPLE?tag=achadosreviews-20');
+      setPriceCurrent('');
+      setPriceOriginal('');
+      setDiscountPercent('');
+      setAffiliateUrl('');
       setPartnerStore('Amazon Brasil');
       setOtherStores([]);
-      setPros([
-        'Construção reforçada com acabamento de alta qualidade e durabilidade comprovada',
-        'Desempenho ágil e eficiente com excelente estabilidade operacional'
-      ]);
-      setCons([
-        'Manual de instruções completo pode requerer download pelo aplicativo da fabricante'
-      ]);
-      setSpecifications([
-        { label: 'Construção e Materiais', value: 'Estrutura reforçada de alta resistência' },
-        { label: 'Conectividade e Padrões', value: 'Padrão moderno de alta velocidade e compatibilidade universal' },
-        { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
-      ]);
-      setContent('### Construção, Ergonomia e Acabamento\n\nO produto apresenta projeto sólido e cuidado nos detalhes de engenharia. Os encaixes são precisos e os materiais transmitem sensação imediata de confiabilidade.\n\n### Desempenho e Eficiência no Dia a Dia\n\nNos testes práticos de rotina, as funcionalidades operaram com estabilidade plena, entregando a performance anunciada sem superaquecimento ou falhas.\n\n### Relação Custo-Benefício e Veredito\n\nConsiderando a robustez dos componentes e o valor praticado na oferta atual, trata-se de uma recomendação sólida de compra.');
-      setVerdict('Uma das melhores escolhas da categoria na faixa de preço, recomendado tanto para iniciantes quanto usuários exigentes.');
+      setPros(['']);
+      setCons(['']);
+      setSpecifications([{ label: '', value: '' }]);
+      setContent('');
+      setVerdict('');
       setScoreCostBenefit(4.8);
       setScorePerformance(4.8);
       setScoreBuild(4.8);
       setScoreUsability(4.9);
-      setFaqs([
-        { question: 'O produto é original e possui garantia nacional?', answer: 'Sim, todos os itens adquiridos através das lojas oficiais parceiras contam com nota fiscal eletrônica e garantia de 12 meses.' }
-      ]);
+      setFaqs([{ question: '', answer: '' }]);
+      setPostKit(undefined);
+      setActiveTab('basic');
       setMagicInput('');
       setMagicStatus(null);
+      setEnrichSuccessMessage(null);
+      setCopiedField(null);
     }
   }, [reviewToEdit, isOpen, categories]);
 
@@ -241,14 +247,16 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
     const trimmedInput = magicInput.trim();
     let resultData: any = null;
 
-    // 1. Tenta a rota /api/analyze-product (funciona via server.ts local e _redirects na Netlify)
+    const availableCategoryNames = categories.map(c => c.name);
+
+    // 1. Tenta a rota /api/analyze-product (funciona via server.ts local com Gemini + Search Grounding)
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const timeoutId = setTimeout(() => controller.abort(), 45000);
       const response = await fetch('/api/analyze-product', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: trimmedInput }),
+        body: JSON.stringify({ input: trimmedInput, categories: availableCategoryNames }),
         signal: controller.signal
       });
       clearTimeout(timeoutId);
@@ -266,11 +274,11 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
     if (!resultData) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const timeoutId = setTimeout(() => controller.abort(), 20000);
         const response = await fetch('/.netlify/functions/analyze-product', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ input: trimmedInput }),
+          body: JSON.stringify({ input: trimmedInput, categories: availableCategoryNames }),
           signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -353,54 +361,66 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)+/g, '');
 
-      // Ficha técnica precisa por nicho (sem placeholders genéricos de estoque)
+      const litMatch = lower.match(/(\d+(?:[.,]\d+)?)\s*(?:litros?|l\b)/i);
+      const wattMatch = lower.match(/(\d+)\s*w(?:atts?)?\b/i);
+      const ramMatch = lower.match(/(\d+\s*gb)\s*(?:de\s*)?(?:ram|mem[oó]ria)?/i);
+      const ssdMatch = lower.match(/(\d+\s*(?:gb|tb))\s*(?:ssd|nvme|hd|armazenamento)/i);
+
+      // Ficha técnica precisa por nicho (sem placeholders genéricos ou litragem inventada)
       const dynamicSpecs = isMobility ? [
-        { label: 'Motor e Potência', value: '400W de alta eficiência com aceleração progressiva' },
-        { label: 'Bateria e Alimentação', value: '48V Bateria de Lítio Removível Bivolt 110V/220V' },
-        { label: 'Autonomia Estimada', value: '20 a 30 km por carga completa' },
-        { label: 'Velocidade Máxima', value: 'Até 25 km/h com seletor de velocidade' },
-        { label: 'Sistema de Frenagem', value: 'Freios a disco mecânico duplo (dianteiro e traseiro)' },
-        { label: 'Estrutura', value: 'Quadro reforçado com design dobrável portátil' },
-        { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
+        { label: 'Motor e Potência', value: wattMatch ? `${wattMatch[1]}W de potência elétrica` : 'Motor elétrico de alto torque' },
+        { label: 'Bateria e Alimentação', value: 'Bateria de Lítio Recarregável Bivolt' },
+        { label: 'Autonomia Estimada', value: '20 a 35 km por carga (conforme relevo e peso)' },
+        { label: 'Sistema de Frenagem', value: 'Freios a disco duplo (dianteiro e traseiro)' },
+        { label: 'Garantia', value: 'Garantia do fabricante com nota fiscal' }
       ] : isNotebook ? [
-        { label: 'Processador (CPU)', value: 'Arquitetura moderna multi-core de alto rendimento' },
-        { label: 'Memória RAM', value: 'Memória DDR4/DDR5 com suporte a multitarefas' },
-        { label: 'Armazenamento', value: 'SSD NVMe PCIe de alta velocidade de leitura' },
-        { label: 'Tela e Painel', value: '15.6 polegadas Full HD com acabamento antirreflexo' },
-        { label: 'Conectividade', value: 'Portas USB 3.2, USB Tipo-C, saída HDMI, Wi-Fi veloz e Bluetooth' },
-        { label: 'Bateria e Autonomia', value: 'Bateria com autonomia média de até 6 a 8 horas em uso moderado' },
-        { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
+        { label: 'Processador (CPU)', value: 'Processador multi-core conforme versão selecionada' },
+        { label: 'Memória RAM', value: ramMatch ? `${ramMatch[1].toUpperCase()} (verificar expansibilidade)` : 'Memória DDR4/DDR5 para multitarefa' },
+        { label: 'Armazenamento', value: ssdMatch ? `SSD ${ssdMatch[1].toUpperCase()}` : 'SSD NVMe PCIe de alta velocidade' },
+        { label: 'Tela e Painel', value: 'Painel Full HD com revestimento antirreflexo' },
+        { label: 'Conectividade', value: 'USB 3.2, USB-C, saída HDMI, Wi-Fi e Bluetooth' }
       ] : isWatch ? [
-        { label: 'Tela', value: '1.43 polegadas AMOLED/IPS tátil de alta definição' },
-        { label: 'Resistência à Água', value: '5 ATM / Certificação à prova de chuva e natação rasa' },
-        { label: 'Autonomia da Bateria', value: 'Até 10 a 14 dias em uso moderado' },
-        { label: 'Sensores de Saúde', value: 'Monitor cardíaco contínuo, oxímetro SpO2 e sono' },
-        { label: 'Conectividade', value: 'Bluetooth 5.3 com notificações inteligentes em português' },
-        { label: 'Garantia', value: '12 meses oficial de fábrica com nota fiscal' }
+        { label: 'Tela', value: 'Display tátil de alta definição e brilho externo' },
+        { label: 'Resistência à Água', value: '5 ATM / Certificação para chuva e treinos aquáticos' },
+        { label: 'Sensores de Saúde', value: 'Batimentos cardíacos, SpO2 e monitoramento do sono' },
+        { label: 'Conectividade', value: 'Bluetooth com notificações em português' }
       ] : isAudio ? [
         { label: 'Drivers Acústicos', value: 'Drivers dinâmicos de alta definição acústica' },
-        { label: 'Cancelamento de Ruído', value: 'ANC ativo com atenuação de ruídos do ambiente' },
-        { label: 'Autonomia da Bateria', value: 'Bateria de longa duração para reprodução diária sem recargas constantes' },
-        { label: 'Conectividade', value: 'Bluetooth 5.3 com pareamento ágil' },
-        { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
+        { label: 'Conectividade', value: 'Bluetooth 5.3 com pareamento rápido' },
+        { label: 'Microfone e Chamadas', value: 'Microfone integrado com redução de ruído ambiente' },
+        { label: 'Carregamento', value: 'Porta USB-C de recarga rápida' }
       ] : isKitchen ? [
-        { label: 'Potência', value: 'Alta potência com aquecimento por convecção de ar 360°' },
-        { label: 'Capacidade Útil', value: 'Espaço generoso para preparo de porções completas' },
-        { label: 'Temperatura', value: 'Controle digital ajustável de 80°C a 200°C' },
-        { label: 'Timer', value: 'Temporizador sonoro de até 60 minutos com desligamento automático' },
-        { label: 'Cesto e Revestimento', value: 'Antiaderente de fácil higienização' },
-        { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
+        { label: 'Capacidade Real', value: litMatch ? `${litMatch[1]} Litros` : 'Conforme litragem oficial do modelo' },
+        { label: 'Potência Elétrica', value: wattMatch ? `${wattMatch[1]}W` : 'Alta potência com aquecimento por convecção' },
+        { label: 'Controle de Temperatura', value: 'Ajuste de temperatura de 80°C a 200°C com timer' },
+        { label: 'Revestimento Interno', value: 'Antiaderente removível de limpeza prática' }
       ] : [
-        { label: 'Construção e Materiais', value: 'Estrutura reforçada de alta durabilidade e acabamento refinado' },
-        { label: 'Conectividade e Padrões', value: 'Interfaces modernas de alta velocidade e compatibilidade universal' },
-        { label: 'Eficiência Operacional', value: 'Projetado com baixo consumo e alto rendimento operacional' },
-        { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
+        { label: 'Produto Analisado', value: extractedTitle },
+        { label: 'Categoria', value: matchedCat },
+        { label: 'Garantia', value: 'Garantia legal e suporte oficial do vendedor' }
       ];
+
+      const emergencyPostKit = buildClientPostKit({
+        title: extractedTitle,
+        slug: generatedSlug,
+        priceCurrent: 'R$ 299,90',
+        priceOriginal: 'R$ 399,00',
+        partnerStore: detectedStore,
+        affiliateUrl: isUrl ? trimmedInput : '',
+        category: matchedCat,
+        rating: 4.8,
+        pros: [
+          `Proposta técnica de ${extractedTitle} alinhada à categoria ${matchedCat}`,
+          `Oferta monitorada com segurança de entrega pela ${detectedStore}`
+        ],
+        verdict: `Boa opção de compra para quem busca ${extractedTitle} com preço competitivo na ${detectedStore}.`,
+        type: 'review'
+      });
 
       resultData = {
         title: extractedTitle,
         slug: generatedSlug,
-        subtitle: `Análise técnica de especificações, durabilidade e custo-benefício em compras online.`,
+        subtitle: `Análise de ${extractedTitle}: ficha técnica, pontos fortes, atenção e custo-benefício na ${detectedStore}.`,
         category: matchedCat,
         coverImage: '',
         partnerStore: detectedStore,
@@ -409,25 +429,26 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
         priceOriginal: 'R$ 399,00',
         discountPercent: '25% de desconto',
         pros: [
-          'Construção reforçada com materiais de excelente durabilidade comprovada',
-          'Desempenho ágil e estável nas tarefas diárias sem travamentos',
-          'Ótima relação de custo-benefício em comparação com alternativas diretas',
-          'Configuração intuitiva e compatibilidade ampla com múltiplos dispositivos'
+          `Conjunto técnico de ${extractedTitle} bem posicionado na categoria ${matchedCat}`,
+          `Especificações adequadas para uso diário sem perda de eficiência`,
+          `Disponibilidade verificada com nota fiscal na ${detectedStore}`
         ],
         cons: [
-          'Disponibilidade de cores e voltagem depende do estoque do vendedor parceiro',
-          'Manual completo de instruções pode requerer consulta digital'
+          'Conferir voltagem, cor e capacidade exata nas variações do anúncio antes de fechar o pedido',
+          'Preço promocional sujeito à alteração de estoque na loja parceira'
         ],
         specifications: dynamicSpecs,
-        content: `### Construção, Ergonomia e Acabamento\n\nO produto apresenta projeto sólido e cuidado nos detalhes de engenharia. Os encaixes são precisos e os materiais transmitem sensação imediata de confiabilidade.\n\n### Desempenho e Eficiência no Dia a Dia\n\nNos testes práticos de rotina, as funcionalidades operaram com estabilidade plena, entregando a performance anunciada sem superaquecimento ou falhas.\n\n### Relação Custo-Benefício e Veredito\n\nConsiderando a robustez dos componentes e o valor praticado na oferta atual, trata-se de uma recomendação sólida de compra para quem busca qualidade duradoura.`,
-        verdict: 'Uma recomendação sólida e segura de compra com alto índice de satisfação entre usuários.',
+        content: `### Construção e Proposta Técnica\n\nO ${extractedTitle} traz um conjunto equilibrado para quem procura praticidade e confiabilidade na categoria ${matchedCat}.\n\n### Desempenho no Uso Diário\n\nAvaliando a ficha técnica e o posicionamento de preço, o modelo entrega desempenho compatível com sua faixa de valor na ${detectedStore}.\n\n### Custo-Benefício e Veredito\n\nPara quem busca os recursos do ${extractedTitle}, trata-se de uma alternativa competitiva com bom retorno pelo investimento.`,
+        verdict: `Compra recomendada para quem procura especificamente o ${extractedTitle} com garantia oficial e oferta na ${detectedStore}.`,
         scoreCostBenefit: 4.8,
         scorePerformance: 4.8,
         scoreBuild: 4.7,
         scoreUsability: 4.9,
         faqs: [
-          { question: 'O produto é original e possui nota fiscal?', answer: 'Sim, todos os itens adquiridos através das lojas parceiras oficiais contam com nota fiscal eletrônica e garantia de 12 meses.' }
-        ]
+          { question: `O ${extractedTitle} é original e acompanha nota fiscal?`, answer: `Sim, comprando através dos links verificados da ${detectedStore} o produto é enviado com nota fiscal eletrônica e garantia legal.` },
+          { question: `O que observar antes de comprar o ${extractedTitle}?`, answer: 'Verifique a variação selecionada (cor, capacidade ou voltagem 110V/220V) diretamente no anúncio oficial antes do pagamento.' }
+        ],
+        postKit: emergencyPostKit
       };
     }
 
@@ -475,6 +496,23 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
       if (d.scoreUsability) setScoreUsability(d.scoreUsability);
       if (d.faqs && Array.isArray(d.faqs)) setFaqs(d.faqs);
       if (d.rating) setRating(d.rating);
+      if (d.postKit) {
+        setPostKit(sanitizePostKit(d.postKit));
+      } else {
+        setPostKit(buildClientPostKit({
+          title: d.title || title,
+          slug: d.slug || slug,
+          priceCurrent: finalPriceCurrent,
+          priceOriginal: finalPriceOriginal,
+          partnerStore: d.partnerStore || partnerStore,
+          affiliateUrl: /^https?:\/\//i.test(trimmedInput) ? trimmedInput : (d.affiliateUrl || affiliateUrl),
+          category: matchedCategory?.name || d.category || category,
+          rating: d.rating || rating,
+          pros: d.pros || pros,
+          verdict: d.verdict || verdict,
+          type: 'review'
+        }));
+      }
 
       // Tratamento prioritário da imagem original extraída
       if (d.coverImage && (d.coverImage.startsWith('http') || d.coverImage.startsWith('//'))) {
@@ -523,17 +561,26 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
     try {
       let enrichedData: any = null;
 
-      // 1. Tenta endpoint dedicado /api/enrich-details
+      // 1. Tenta endpoint dedicado /api/enrich-details com contexto completo
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 45000);
         const response = await fetch('/api/enrich-details', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             title: targetTitle,
             category,
-            affiliateUrl
-          })
+            affiliateUrl,
+            categories: categories.map(c => c.name),
+            priceCurrent,
+            priceOriginal,
+            partnerStore,
+            slug
+          }),
+          signal: controller.signal
         });
+        clearTimeout(timeoutId);
         if (response.ok) {
           const json = await response.json();
           if (json.success && json.data) {
@@ -547,11 +594,15 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
       // 2. Se falhar, tenta endpoint /api/analyze-product
       if (!enrichedData) {
         try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 25000);
           const response = await fetch('/api/analyze-product', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ input: targetTitle })
+            body: JSON.stringify({ input: targetTitle, categories: categories.map(c => c.name) }),
+            signal: controller.signal
           });
+          clearTimeout(timeoutId);
           if (response.ok) {
             const json = await response.json();
             if (json.success && json.data) {
@@ -565,6 +616,9 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
 
       // 3. Aplica os dados enriquecidos se encontrados
       if (enrichedData) {
+        if (!subtitle.trim() && enrichedData.subtitle) {
+          setSubtitle(enrichedData.subtitle);
+        }
         if (Array.isArray(enrichedData.pros) && enrichedData.pros.length > 0) {
           setPros(enrichedData.pros);
         }
@@ -589,8 +643,11 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
         if (enrichedData.scorePerformance) setScorePerformance(enrichedData.scorePerformance);
         if (enrichedData.scoreBuild) setScoreBuild(enrichedData.scoreBuild);
         if (enrichedData.scoreUsability) setScoreUsability(enrichedData.scoreUsability);
+        if (enrichedData.postKit) {
+          setPostKit(sanitizePostKit(enrichedData.postKit));
+        }
 
-        setEnrichSuccessMessage('Informações técnicas reais, prós/contras e FAQs extraídos com sucesso para este produto!');
+        setEnrichSuccessMessage('Informações técnicas reais, prós/contras, FAQs e kit para postagem gerados com sucesso!');
         setTimeout(() => setEnrichSuccessMessage(null), 7000);
       } else {
         setFormError('Não foi possível obter dados automáticos agora. Você pode preencher os campos manualmente.');
@@ -652,6 +709,82 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
     </div>
   );
 
+  const handleGeneratePostKitOnly = async () => {
+    const targetTitle = title.trim() || magicInput.trim();
+    if (!targetTitle) {
+      setFormError('Informe o Título da Avaliação na Aba 1 antes de gerar o Kit para Postagem.');
+      setActiveTab('basic');
+      return;
+    }
+
+    setIsGeneratingPostKit(true);
+    setFormError(null);
+    let generatedKit: PostKit | undefined;
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 18000);
+      const res = await fetch('/api/generate-post-kit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: targetTitle,
+          slug,
+          priceCurrent,
+          priceOriginal,
+          partnerStore,
+          affiliateUrl,
+          category,
+          rating,
+          pros: pros.filter(p => p.trim()),
+          cons: cons.filter(c => c.trim()),
+          verdict,
+          type: 'review'
+        }),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          generatedKit = sanitizePostKit(json.data);
+        }
+      }
+    } catch {
+      // Fallback garantido abaixo
+    }
+
+    if (!generatedKit) {
+      generatedKit = buildClientPostKit({
+        title: targetTitle,
+        slug,
+        priceCurrent,
+        priceOriginal,
+        partnerStore,
+        affiliateUrl,
+        category,
+        rating,
+        pros: pros.filter(p => p.trim()),
+        verdict,
+        type: 'review'
+      });
+    }
+
+    setPostKit(generatedKit);
+    setIsGeneratingPostKit(false);
+  };
+
+  const handleCopyPostKitField = async (field: string, text: string) => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(prev => (prev === field ? null : prev)), 2000);
+    } catch {
+      // Ignora erro de permissão de clipboard
+    }
+  };
+
   const handleTitleChange = (val: string) => {
     setTitle(val);
     if (!reviewToEdit || !slug) {
@@ -691,11 +824,66 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
     setIsSaving(true);
 
     try {
-      const sanitizedCover = sanitizeImageUrl(coverImage) || IMAGE_PRESETS[0].url;
+      const sanitizedCover = sanitizeImageUrl(coverImage) || IMAGE_PRESETS[5].url;
+      const finalSlug = slug.trim() || `avaliacao-${Date.now()}`;
+      const cleanPros = pros.filter(p => p.trim().length > 0);
+      const cleanCons = cons.filter(c => c.trim().length > 0);
+
+      let finalPostKit = sanitizePostKit(postKit);
+      if (!finalPostKit) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 7000);
+          const kitRes = await fetch('/api/generate-post-kit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: title.trim(),
+              slug: finalSlug,
+              priceCurrent: priceCurrent.trim(),
+              priceOriginal: priceOriginal.trim(),
+              partnerStore: partnerStore.trim(),
+              affiliateUrl: affiliateUrl.trim(),
+              category,
+              rating: Number(rating) || 4.8,
+              pros: cleanPros,
+              cons: cleanCons,
+              verdict: verdict.trim(),
+              type: 'review'
+            }),
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          if (kitRes.ok) {
+            const kitJson = await kitRes.json();
+            if (kitJson.success && kitJson.data) {
+              finalPostKit = sanitizePostKit(kitJson.data);
+            }
+          }
+        } catch {
+          // Usa fallback determinístico completo abaixo
+        }
+
+        if (!finalPostKit) {
+          finalPostKit = buildClientPostKit({
+            title: title.trim(),
+            slug: finalSlug,
+            priceCurrent: priceCurrent.trim(),
+            priceOriginal: priceOriginal.trim(),
+            partnerStore: partnerStore.trim(),
+            affiliateUrl: affiliateUrl.trim(),
+            category,
+            rating: Number(rating) || 4.8,
+            pros: cleanPros,
+            verdict: verdict.trim(),
+            type: 'review'
+          });
+        }
+      }
 
       const reviewData: Review = {
         id: id || `rev-${Date.now()}`,
-        slug: slug || `avaliacao-${Date.now()}`,
+        slug: finalSlug,
         title: title.trim(),
         subtitle: subtitle.trim(),
         category,
@@ -707,8 +895,8 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
         affiliateUrl: affiliateUrl.trim(),
         partnerStore: partnerStore.trim(),
         otherStores: cleanOtherStores(otherStores, partnerStore.trim(), affiliateUrl.trim()),
-        pros: pros.filter(p => p.trim().length > 0),
-        cons: cons.filter(c => c.trim().length > 0),
+        pros: cleanPros,
+        cons: cleanCons,
         specifications: specifications.filter(s => s.label.trim().length > 0),
         content: content.trim(),
         verdict: verdict.trim(),
@@ -719,6 +907,7 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
           usability: Number(scoreUsability) || 4.5
         },
         faqs: faqs.filter(f => f.question.trim().length > 0),
+        postKit: finalPostKit,
         featured,
         viewsCount: reviewToEdit?.viewsCount || 0,
         clicksCount: reviewToEdit?.clicksCount || 0,
@@ -892,6 +1081,17 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
             }`}
           >
             6. Perguntas Frequentes
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('postkit')}
+            className={`px-3 py-1.5 rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'postkit' ? 'bg-white text-slate-900 font-bold shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Share2 className="w-3.5 h-3.5 text-[#FF6B00]" />
+            <span>7. Kit para Postagem</span>
+            {postKit && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
           </button>
         </div>
 
@@ -1707,6 +1907,207 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* TAB 7: KIT PARA POSTAGEM (SEO + REDES SOCIAIS + VIDEO) */}
+          {activeTab === 'postkit' && (
+            <div className="space-y-4">
+              <div className="p-4 bg-gradient-to-r from-orange-50 via-amber-50 to-yellow-50 border border-orange-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-[#FF6B00] text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <Share2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900">
+                      Recursos Automáticos para Postagem &amp; SEO
+                    </h4>
+                    <p className="text-3xs text-slate-600 leading-relaxed mt-0.5">
+                      Textos prontos para Google, WhatsApp/Telegram, Instagram e Reels/Shorts gerados com os dados reais deste produto. Ao salvar, tudo fica gravado automaticamente.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleGeneratePostKitOnly}
+                  disabled={isGeneratingPostKit}
+                  className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-[#FF6B00] hover:bg-[#e05e00] disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-sm cursor-pointer shrink-0 transition-colors"
+                >
+                  {isGeneratingPostKit ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Gerando Kit...</span>
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>{postKit ? 'Atualizar Kit com IA' : 'Gerar Kit Agora'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {(() => {
+                const currentKit: PostKit = postKit || buildClientPostKit({
+                  title: title || 'Produto',
+                  slug,
+                  priceCurrent,
+                  priceOriginal,
+                  partnerStore,
+                  affiliateUrl,
+                  category,
+                  rating,
+                  pros,
+                  verdict,
+                  type: 'review'
+                });
+                const updateKitField = (field: keyof PostKit, value: string) => {
+                  setPostKit({ ...currentKit, [field]: value });
+                };
+                return (
+                  <div className="space-y-4">
+                    {!postKit && (
+                      <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-2xs text-slate-600">
+                        Pré-visualização automática pronta! Clique em &quot;Gerar Kit Agora&quot; para refinar com IA ou edite qualquer campo abaixo antes de salvar.
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-xs font-bold text-slate-700">
+                            Título SEO (Google — {currentKit.seoTitle.length}/60)
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyPostKitField('seoTitle', currentKit.seoTitle)}
+                            className="inline-flex items-center gap-1 text-3xs font-bold text-cyan-700 hover:text-cyan-900 cursor-pointer"
+                          >
+                            {copiedField === 'seoTitle' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                            <span>{copiedField === 'seoTitle' ? 'Copiado!' : 'Copiar'}</span>
+                          </button>
+                        </div>
+                        <input
+                          type="text"
+                          value={currentKit.seoTitle}
+                          onChange={(e) => updateKitField('seoTitle', e.target.value)}
+                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-xs font-bold text-slate-700">
+                            Selo de Destaque (Card / Story)
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyPostKitField('highlightsBadge', currentKit.highlightsBadge)}
+                            className="inline-flex items-center gap-1 text-3xs font-bold text-cyan-700 hover:text-cyan-900 cursor-pointer"
+                          >
+                            {copiedField === 'highlightsBadge' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                            <span>{copiedField === 'highlightsBadge' ? 'Copiado!' : 'Copiar'}</span>
+                          </button>
+                        </div>
+                        <input
+                          type="text"
+                          value={currentKit.highlightsBadge}
+                          onChange={(e) => updateKitField('highlightsBadge', e.target.value)}
+                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-bold text-slate-700">
+                          Meta Description SEO (Google — {currentKit.metaDescription.length}/160)
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyPostKitField('metaDescription', currentKit.metaDescription)}
+                          className="inline-flex items-center gap-1 text-3xs font-bold text-cyan-700 hover:text-cyan-900 cursor-pointer"
+                        >
+                          {copiedField === 'metaDescription' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedField === 'metaDescription' ? 'Copiado!' : 'Copiar'}</span>
+                        </button>
+                      </div>
+                      <textarea
+                        rows={2}
+                        value={currentKit.metaDescription}
+                        onChange={(e) => updateKitField('metaDescription', e.target.value)}
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-bold text-emerald-800">
+                          Copy Pronta para Grupos (WhatsApp / Telegram)
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyPostKitField('whatsappCopy', currentKit.whatsappCopy)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-md text-3xs font-bold cursor-pointer"
+                        >
+                          {copiedField === 'whatsappCopy' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedField === 'whatsappCopy' ? 'Copiado!' : 'Copiar Mensagem'}</span>
+                        </button>
+                      </div>
+                      <textarea
+                        rows={5}
+                        value={currentKit.whatsappCopy}
+                        onChange={(e) => updateKitField('whatsappCopy', e.target.value)}
+                        className="w-full px-3 py-2 text-xs border border-emerald-200 rounded-lg bg-emerald-50/30 font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-bold text-fuchsia-800">
+                          Legenda para Instagram / Pinterest / Facebook
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyPostKitField('instagramCaption', currentKit.instagramCaption)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-fuchsia-100 hover:bg-fuchsia-200 text-fuchsia-800 rounded-md text-3xs font-bold cursor-pointer"
+                        >
+                          {copiedField === 'instagramCaption' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedField === 'instagramCaption' ? 'Copiado!' : 'Copiar Legenda'}</span>
+                        </button>
+                      </div>
+                      <textarea
+                        rows={5}
+                        value={currentKit.instagramCaption}
+                        onChange={(e) => updateKitField('instagramCaption', e.target.value)}
+                        className="w-full px-3 py-2 text-xs border border-fuchsia-200 rounded-lg bg-fuchsia-50/20"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-bold text-slate-800">
+                          Roteiro de Vídeo Curto (Reels / TikTok / YouTube Shorts)
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyPostKitField('shortVideoScript', currentKit.shortVideoScript)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-md text-3xs font-bold cursor-pointer"
+                        >
+                          {copiedField === 'shortVideoScript' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedField === 'shortVideoScript' ? 'Copiado!' : 'Copiar Roteiro'}</span>
+                        </button>
+                      </div>
+                      <textarea
+                        rows={4}
+                        value={currentKit.shortVideoScript}
+                        onChange={(e) => updateKitField('shortVideoScript', e.target.value)}
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50"
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 

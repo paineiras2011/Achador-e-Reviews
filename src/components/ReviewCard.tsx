@@ -1,6 +1,7 @@
 import React from 'react';
-import { Star, ExternalLink, ArrowRight, Tag } from 'lucide-react';
+import { Star, ExternalLink, ArrowRight } from 'lucide-react';
 import { Review } from '../types';
+import { calculateDiscount } from '../utils/priceHelpers';
 
 interface ReviewCardProps {
   review: Review;
@@ -13,18 +14,31 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({
   onReadReview,
   onAffiliateClick
 }) => {
+  const reviewUrl = `/reviews/${review.slug}`;
+  const discountInfo = calculateDiscount(review.priceCurrent, review.priceOriginal);
+
+  const handleReviewLinkClick = (e: React.MouseEvent) => {
+    if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      onReadReview(review.slug);
+    }
+  };
+
   return (
     <article className="group bg-white rounded-xl border border-slate-200 overflow-hidden hover:shadow-md transition-all duration-300 flex flex-col justify-between">
       <div>
         {/* Cover Image Container */}
-        <div 
-          onClick={() => onReadReview(review.slug)}
-          className="relative aspect-4/3 w-full bg-slate-100 overflow-hidden cursor-pointer"
+        <a
+          href={reviewUrl}
+          onClick={handleReviewLinkClick}
+          aria-label={`Ler análise completa de ${review.title}`}
+          className="relative aspect-4/3 w-full bg-slate-100 overflow-hidden cursor-pointer block"
         >
           <img
             src={review.coverImage}
-            alt={review.title}
+            alt={`${review.title} - ${review.category}`}
             referrerPolicy="no-referrer"
+            loading="lazy"
             onError={(e) => {
               const img = e.currentTarget as HTMLImageElement;
               if (img.src && img.src.includes('.webp') && img.src.includes('mlstatic.com')) {
@@ -41,7 +55,7 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({
           <div className="absolute bottom-2.5 right-2.5 bg-white/90 backdrop-blur-xs text-slate-800 text-2xs font-semibold px-2 py-0.5 rounded border border-slate-200">
             {review.partnerStore}
           </div>
-        </div>
+        </a>
 
         {/* Card Body */}
         <div className="p-4 sm:p-5 space-y-2.5">
@@ -56,11 +70,10 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({
           </div>
 
           {/* Title */}
-          <h3 
-            onClick={() => onReadReview(review.slug)}
-            className="font-bold text-base text-slate-900 group-hover:text-cyan-700 transition-colors line-clamp-2 cursor-pointer leading-snug"
-          >
-            {review.title}
+          <h3 className="font-bold text-base text-slate-900 group-hover:text-cyan-700 transition-colors line-clamp-2 leading-snug">
+            <a href={reviewUrl} onClick={handleReviewLinkClick} className="block">
+              {review.title}
+            </a>
           </h3>
 
           {/* Subtitle / Snippet */}
@@ -70,7 +83,7 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({
 
           {/* Price & Disclaimer */}
           <div className="pt-2 border-t border-slate-100 flex flex-col gap-0.5">
-            <div className="flex items-baseline justify-between">
+            <div className="flex items-baseline justify-between gap-2">
               <div className="flex items-baseline gap-2">
                 <span className="text-lg font-bold font-mono tabular-nums text-slate-950">
                   {review.priceCurrent}
@@ -81,11 +94,15 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({
                   </span>
                 )}
               </div>
-              {review.discountPercent && (
+              {discountInfo && discountInfo.savingsValue > 0 ? (
+                <span className="text-3xs font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 font-mono whitespace-nowrap">
+                  Economize {discountInfo.savings}
+                </span>
+              ) : review.discountPercent ? (
                 <span className="text-3xs font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-200 font-mono">
                   {review.discountPercent}
                 </span>
-              )}
+              ) : null}
             </div>
             <p className="text-3xs text-slate-400 font-medium">
               * Preço sujeito a alteração
@@ -96,13 +113,14 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({
 
       {/* Card Action Footer */}
       <div className="p-4 sm:p-5 pt-0 grid grid-cols-2 gap-2">
-        <button
-          onClick={() => onReadReview(review.slug)}
+        <a
+          href={reviewUrl}
+          onClick={handleReviewLinkClick}
           className="w-full py-2 px-3 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center justify-center gap-1"
         >
           <span>Ver Análise</span>
           <ArrowRight className="w-3.5 h-3.5" />
-        </button>
+        </a>
 
         <a
           href={review.affiliateUrl}

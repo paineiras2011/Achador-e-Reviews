@@ -14,6 +14,7 @@ import { GuideDetail } from './components/GuideDetail';
 import { AdBannerSlot } from './components/AdBannerSlot';
 import { Footer } from './components/Footer';
 import { SeoHead } from './components/SeoHead';
+import { InfoPage, InfoPageType } from './components/InfoPage';
 import { AdminLoginModal } from './components/admin/AdminLoginModal';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { ReviewEditorModal } from './components/admin/ReviewEditorModal';
@@ -22,7 +23,7 @@ import { StoreService } from './services/store';
 import { Review, Category, Banner, SiteSettings, AffiliateClick, ComparisonGuide } from './types';
 import { INITIAL_REVIEWS, INITIAL_CATEGORIES, INITIAL_BANNERS, INITIAL_SETTINGS, INITIAL_GUIDES } from './data/initialData';
 import { testFirestoreConnection } from './lib/firebase';
-import { Sparkles, ShieldCheck, LogOut, Layers, Award } from 'lucide-react';
+import { Sparkles, ShieldCheck, LogOut, Layers } from 'lucide-react';
 
 export default function App() {
   const [reviews, setReviews] = useState<Review[]>(INITIAL_REVIEWS);
@@ -40,9 +41,10 @@ export default function App() {
     recentClicks: [] as AffiliateClick[]
   });
 
-  const [currentView, setCurrentView] = useState<'home' | 'review' | 'guide' | 'admin'>('home');
+  const [currentView, setCurrentView] = useState<'home' | 'review' | 'guide' | 'info' | 'admin'>('home');
   const [currentReviewSlug, setCurrentReviewSlug] = useState<string | null>(null);
   const [currentGuideSlug, setCurrentGuideSlug] = useState<string | null>(null);
+  const [currentInfoPage, setCurrentInfoPage] = useState<InfoPageType>('sobre');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -79,49 +81,63 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => {
-    testFirestoreConnection();
-    loadData();
-
-    // Roteamento dinâmico por URL (ex: /reviews/slug, /guias/slug ou /admin)
-    const path = window.location.pathname;
-    if (path.startsWith('/reviews/')) {
-      const slug = path.replace('/reviews/', '');
+  const applyRouteFromPath = useCallback((path: string, availableCats: Category[]) => {
+    const cleanPath = path.replace(/\/+$/, '') || '/';
+    if (cleanPath.startsWith('/reviews/')) {
+      const slug = cleanPath.replace('/reviews/', '');
       if (slug) {
         setCurrentReviewSlug(slug);
+        setCurrentGuideSlug(null);
         setCurrentView('review');
       }
-    } else if (path.startsWith('/guias/')) {
-      const slug = path.replace('/guias/', '');
+    } else if (cleanPath.startsWith('/guias/')) {
+      const slug = cleanPath.replace('/guias/', '');
       if (slug) {
         setCurrentGuideSlug(slug);
+        setCurrentReviewSlug(null);
         setCurrentView('guide');
       }
-    } else if (path === '/admin') {
+    } else if (cleanPath.startsWith('/categoria/')) {
+      const catSlug = cleanPath.replace('/categoria/', '').toLowerCase();
+      const matched = availableCats.find(
+        c => c.slug.toLowerCase() === catSlug || c.name.toLowerCase() === decodeURIComponent(catSlug)
+      );
+      setSelectedCategory(matched ? matched.name : 'all');
+      setCurrentReviewSlug(null);
+      setCurrentGuideSlug(null);
+      setCurrentView('home');
+    } else if (cleanPath === '/sobre' || cleanPath === '/metodologia' || cleanPath === '/privacidade' || cleanPath === '/termos') {
+      setCurrentInfoPage(cleanPath.slice(1) as InfoPageType);
+      setCurrentReviewSlug(null);
+      setCurrentGuideSlug(null);
+      setCurrentView('info');
+    } else if (cleanPath === '/admin') {
       setCurrentView('admin');
       if (!isAdminLoggedIn) {
         setIsLoginModalOpen(true);
       }
+    } else {
+      setCurrentView('home');
+      setCurrentReviewSlug(null);
+      setCurrentGuideSlug(null);
     }
+  }, [isAdminLoggedIn]);
 
-    // Suporte aos botões voltar/avançar do navegador
+  useEffect(() => {
+    testFirestoreConnection();
+    loadData();
+
+    // Suporte a query param ?search= (para SearchAction JSON-LD) e ?categoria=
+    const params = new URLSearchParams(window.location.search);
+    const qSearch = params.get('search');
+    const qCat = params.get('categoria');
+    if (qSearch) setSearchQuery(qSearch);
+    if (qCat) setSelectedCategory(qCat);
+
+    applyRouteFromPath(window.location.pathname, categories);
+
     const handlePopState = () => {
-      const currentPath = window.location.pathname;
-      if (currentPath.startsWith('/reviews/')) {
-        const slug = currentPath.replace('/reviews/', '');
-        setCurrentReviewSlug(slug);
-        setCurrentView('review');
-      } else if (currentPath.startsWith('/guias/')) {
-        const slug = currentPath.replace('/guias/', '');
-        setCurrentGuideSlug(slug);
-        setCurrentView('guide');
-      } else if (currentPath === '/admin') {
-        setCurrentView('admin');
-      } else {
-        setCurrentView('home');
-        setCurrentReviewSlug(null);
-        setCurrentGuideSlug(null);
-      }
+      applyRouteFromPath(window.location.pathname, categories);
     };
 
     // Atalho secreto de teclado para abrir o painel de administrador: Ctrl + Shift + A
@@ -139,7 +155,7 @@ export default function App() {
       window.removeEventListener('popstate', handlePopState);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [loadData, isAdminLoggedIn]);
+  }, [loadData, applyRouteFromPath, categories]);
 
   // Handlers de Navegação
   const handleGoHome = () => {
@@ -181,12 +197,24 @@ export default function App() {
 
   const handleSelectCategory = (categoryName: string) => {
     setSelectedCategory(categoryName);
-    if (currentView !== 'home') {
-      setCurrentView('home');
-      setCurrentReviewSlug(null);
-      setCurrentGuideSlug(null);
+    setCurrentView('home');
+    setCurrentReviewSlug(null);
+    setCurrentGuideSlug(null);
+    if (categoryName === 'all' || !categoryName) {
       window.history.pushState({}, '', '/');
+    } else {
+      const matchedCat = categories.find(c => c.name === categoryName);
+      window.history.pushState({}, '', matchedCat ? `/categoria/${matchedCat.slug}` : '/');
     }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleSelectInfoPage = (page: InfoPageType) => {
+    setCurrentInfoPage(page);
+    setCurrentReviewSlug(null);
+    setCurrentGuideSlug(null);
+    setCurrentView('info');
+    window.history.pushState({}, '', `/${page}`);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -356,15 +384,57 @@ export default function App() {
     ? reviews.filter(r => r.id !== activeReview.id && r.category === activeReview.category).slice(0, 3)
     : [];
 
+  const activeCategoryObj = selectedCategory && selectedCategory !== 'all'
+    ? categories.find(c => c.name === selectedCategory) || null
+    : null;
+
+  const infoPageSeoMap: Record<InfoPageType, { title: string; description: string }> = {
+    sobre: {
+      title: 'Sobre Nós – Curadoria Independente',
+      description: 'Conheça o Achados & Reviews, nossa missão editorial independente e como selecionamos as melhores ofertas verificadas.'
+    },
+    metodologia: {
+      title: 'Metodologia de Análise e Critérios',
+      description: 'Entenda como avaliamos custo-benefício, desempenho real, construção, ficha técnica e segurança das lojas parceiras.'
+    },
+    privacidade: {
+      title: 'Política de Privacidade e LGPD',
+      description: 'Saiba como tratamos dados, cookies de afiliados e privacidade no Achados & Reviews em conformidade com a LGPD.'
+    },
+    termos: {
+      title: 'Termos de Uso e Transparência',
+      description: 'Leia os termos de uso, políticas de preços dinâmicos das lojas parceiras e aviso de transparência editorial.'
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 font-sans selection:bg-cyan-500 selection:text-white relative">
       
       {/* Meta Tags Dinâmicas e Schema.org JSON-LD para o Google */}
       <SeoHead
-        title={activeReview ? activeReview.title : activeGuide ? activeGuide.title : undefined}
-        description={activeReview ? activeReview.subtitle : activeGuide ? (activeGuide.subtitle || activeGuide.introContent.slice(0, 160)) : undefined}
+        title={
+          currentView === 'info'
+            ? infoPageSeoMap[currentInfoPage].title
+            : activeReview
+            ? (activeReview.postKit?.seoTitle || activeReview.title)
+            : activeGuide
+            ? (activeGuide.postKit?.seoTitle || activeGuide.title)
+            : undefined
+        }
+        description={
+          currentView === 'info'
+            ? infoPageSeoMap[currentInfoPage].description
+            : activeReview
+            ? (activeReview.postKit?.metaDescription || activeReview.subtitle)
+            : activeGuide
+            ? (activeGuide.postKit?.metaDescription || activeGuide.subtitle || activeGuide.introContent.slice(0, 160))
+            : undefined
+        }
         review={activeReview}
+        guide={activeGuide}
+        category={currentView === 'home' ? activeCategoryObj : null}
         settings={settings}
+        noIndex={currentView === 'admin'}
       />
 
       {/* Barra de Navegação Pública */}
@@ -398,6 +468,7 @@ export default function App() {
               setReviewToEdit(r);
               setIsReviewEditorModalOpen(true);
             }}
+            onSaveReview={handleSaveReview}
             onDeleteReview={handleDeleteReview}
             onViewReview={handleReadReview}
             onOpenCreateGuide={() => {
@@ -408,6 +479,7 @@ export default function App() {
               setGuideToEdit(g);
               setIsGuideEditorModalOpen(true);
             }}
+            onSaveGuide={handleSaveGuide}
             onDeleteGuide={handleDeleteGuide}
             onViewGuide={handleSelectGuide}
             onSaveCategory={handleSaveCategory}
@@ -434,6 +506,18 @@ export default function App() {
             </div>
           </div>
         )
+      ) : currentView === 'info' ? (
+        /* VISÃO: PÁGINAS INSTITUCIONAIS E-E-A-T (Sobre, Metodologia, Privacidade, Termos) */
+        <main className="flex-1">
+          <InfoPage
+            page={currentInfoPage}
+            siteName={settings.siteName}
+            affiliateDisclosure={settings.affiliateDisclosure}
+            onGoHome={handleGoHome}
+            onGoGuides={handleGoGuidesSection}
+            onSelectInfoPage={handleSelectInfoPage}
+          />
+        </main>
       ) : currentView === 'guide' && activeGuide ? (
         /* VISÃO: PÁGINA DE GUIA COMPARATIVO (Artigo Multi-Produtos) */
         <main className="flex-1">
@@ -454,6 +538,8 @@ export default function App() {
             onBack={handleGoHome}
             onReadReview={handleReadReview}
             onSelectGuide={handleSelectGuide}
+            onSelectCategory={handleSelectCategory}
+            onSelectInfoPage={handleSelectInfoPage}
             onAffiliateClick={handleAffiliateClick}
           />
         </main>
@@ -574,11 +660,12 @@ export default function App() {
         </main>
       )}
 
-      {/* Rodapé Limpo (Sem links sociais, sem telefone/e-mail e sem link de admin) */}
+      {/* Rodapé Limpo com Categorias e Links Institucionais E-E-A-T */}
       <Footer
         settings={settings}
         categories={categories}
         onSelectCategory={handleSelectCategory}
+        onSelectInfoPage={handleSelectInfoPage}
       />
 
       {/* Floating Toolbar Discreta para o Gestor Logado (Invisível para visitantes) */}

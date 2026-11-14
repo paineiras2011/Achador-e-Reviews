@@ -4,6 +4,3 @@ Allow: /
 
 # Desencorajar rastreamento de páginas administrativas privadas
 Disallow: /admin
-
-# Sitemap para indexação no Google Search Console e buscadores
-Sitemap: /sitemap.xml

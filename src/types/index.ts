@@ -15,6 +15,15 @@ export interface PartnerOffer {
   badge?: string;
 }
 
+export interface PostKit {
+  seoTitle: string;
+  metaDescription: string;
+  highlightsBadge: string;
+  whatsappCopy: string;
+  instagramCaption: string;
+  shortVideoScript: string;
+}
+
 export interface Review {
   id: string;
   slug: string;
@@ -43,6 +52,7 @@ export interface Review {
     usability: number;
   };
   faqs: FAQItem[];
+  postKit?: PostKit;
   featured?: boolean;
   viewsCount: number;
   clicksCount: number;
@@ -117,6 +127,7 @@ export interface ComparisonGuide {
   buyingTipsContent?: string;
   products: ComparisonProductItem[];
   faqs?: FAQItem[];
+  postKit?: PostKit;
   published: boolean;
   featured?: boolean;
   viewsCount?: number;

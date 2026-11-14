@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
 // Netlify Serverless Function para Autopreenchimento Inteligente de Produtos
 export default async (req: Request) => {
@@ -228,37 +228,61 @@ export default async (req: Request) => {
 
     // Tenta enriquecer com Gemini se a chave estiver configurada
     const apiKey = process.env.GEMINI_API_KEY || '';
+    const basePostKit = {
+      seoTitle: `${finalTitle.slice(0, 48)} Vale a Pena? Análise`,
+      metaDescription: `${finalTitle} por ${extractedPrice || 'R$ 299,90'} na ${detectedStore}. Veja ficha técnica, prós, contras e se vale a pena comprar.`,
+      highlightsBadge: `Nota 4.8 ★ • Verificado na ${detectedStore}`,
+      whatsappCopy: `🔥 *ACHADO VERIFICADO: ${finalTitle}*\n\n💰 Oferta atual: *${extractedPrice || 'R$ 299,90'}*\n🏪 Loja: ${detectedStore} | ⭐ Avaliação: 4.8/5.0\n\n📄 Análise técnica: /reviews/${slug || `produto-${Date.now()}`}${isUrl ? `\n🛒 Conferir oferta: ${input}` : ''}`,
+      instagramCaption: `${finalTitle} — vale a pena? 🔍\n\nConfira a análise técnica completa e ficha real na bio!\n\n💵 Preço observado: ${extractedPrice || 'R$ 299,90'} (${detectedStore})\n\n#achadoseReviews #reviewsbrasil #custobeneficio #ofertasverificadas`,
+      shortVideoScript: `[0-3s GANCHO]: Você compraria ${finalTitle.slice(0, 45)} por ${extractedPrice || 'R$ 299,90'}?\n\n[4-12s DESTAQUES]: Confira os pontos fortes reais na ficha técnica.\n\n[13-22s VEREDITO]: Análise completa no link da bio!`
+    };
+
     if (apiKey) {
       try {
-        const ai = new GoogleGenAI({ apiKey });
+        const ai = new GoogleGenAI({
+          apiKey,
+          httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+        });
         const prompt = `
-Você é um especialista em reviews de tecnologia e hardware no Brasil.
-Analise este produto: "${finalTitle}" (Categoria: ${category}).
-Gere a FICHA TÉCNICA VERDADEIRA (especificações de hardware/engenharia reais como processador, tela, memória, potência, conectividade, bateria), PRÓS E CONTRAS REAIS, ARTIGO e FAQs.
+Você é um especialista em reviews de tecnologia, casa e consumo no Brasil.
+Analise este produto: "${finalTitle}" (Categoria: ${category}, Loja: ${detectedStore}, Preço: ${extractedPrice || 'consultar'}).
+Gere a FICHA TÉCNICA VERDADEIRA (especificações reais como capacidade em litros/GB, potência em Watts, processador, tela, bateria, voltagem), PRÓS E CONTRAS REAIS deste modelo exato, ARTIGO com 3 seções ###, FAQs específicas e postKit completo.
 NUNCA use frases genéricas de estoque como "Condição: Novo original na caixa lacrada" ou "Disponibilidade: Pronta entrega".
 
 Retorne JSON no formato:
 {
+  "subtitle": "Subtítulo específico com diferencial real",
   "pros": ["ponto positivo real 1", "ponto positivo real 2", "ponto positivo real 3"],
   "cons": ["ponto de atenção real 1", "ponto de atenção real 2"],
   "specifications": [
-    {"label": "Especificação Técnica", "value": "Valor do produto"}
+    {"label": "Especificação Técnica", "value": "Valor real do modelo"}
   ],
   "content": "### Design e Materiais\\n\\n...\\n\\n### Desempenho no Dia a Dia\\n\\n...\\n\\n### Veredito\\n\\n...",
-  "verdict": "Veredito conciso",
+  "verdict": "Veredito conciso e honesto",
   "faqs": [
-    {"question": "Pergunta comum?", "answer": "Resposta detalhada"}
-  ]
+    {"question": "Pergunta específica deste modelo?", "answer": "Resposta detalhada"}
+  ],
+  "postKit": {
+    "seoTitle": "string",
+    "metaDescription": "string",
+    "highlightsBadge": "string",
+    "whatsappCopy": "string",
+    "instagramCaption": "string",
+    "shortVideoScript": "string"
+  }
 }
 `;
         const geminiPromise = ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: 'gemini-4-hydrogen',
           contents: prompt,
-          config: { responseMimeType: 'application/json', temperature: 0.2, maxOutputTokens: 1800 }
+          config: {
+            responseMimeType: 'application/json',
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
+          }
         });
 
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout Gemini')), 7000)
+          setTimeout(() => reject(new Error('Timeout Gemini')), 12000)
         );
 
         const res: any = await Promise.race([geminiPromise, timeoutPromise]);
@@ -268,7 +292,7 @@ Retorne JSON no formato:
         const data = {
           title: finalTitle.charAt(0).toUpperCase() + finalTitle.slice(1),
           slug: slug || `produto-${Date.now()}`,
-          subtitle: `Análise técnica de especificações, durabilidade e custo-benefício em compras online.`,
+          subtitle: parsed.subtitle || `Análise técnica de ${finalTitle}: especificações reais, prós, contras e custo-benefício.`,
           category,
           coverImage: ogImage || '/src/assets/images/hero_tech_showcase_1792355762010.jpg',
           partnerStore: detectedStore,
@@ -276,20 +300,22 @@ Retorne JSON no formato:
           priceCurrent: extractedPrice || 'R$ 299,90',
           priceOriginal: extractedOriginalPrice || '',
           discountPercent: '',
-          pros: parsed.pros || ['Construção reforçada de alta qualidade', 'Excelente desempenho no uso diário'],
-          cons: parsed.cons || ['Manual de instruções detalhado apenas no aplicativo'],
+          rating: 4.8,
+          pros: parsed.pros || [`Ótimo equilíbrio técnico de ${finalTitle} na faixa de preço`],
+          cons: parsed.cons || ['Conferir voltagem e variações diretamente no anúncio oficial'],
           specifications: (parsed.specifications || []).filter((s: any) => 
             s && s.label && !/condi[cç][aã]o|disponibilidade|pronta entrega|embalagem/i.test(s.label + ' ' + (s.value || ''))
           ),
-          content: parsed.content || '### Avaliação do Produto\n\nDesempenho confiável e acabamento de alto nível.',
-          verdict: parsed.verdict || 'Uma recomendação sólida de compra para quem busca qualidade e custo-benefício.',
+          content: parsed.content || `### Análise de ${finalTitle}\n\nDesempenho consistente e especificações alinhadas à categoria.`,
+          verdict: parsed.verdict || `Compra recomendada para quem procura as especificações reais de ${finalTitle}.`,
           scoreCostBenefit: 4.8,
           scorePerformance: 4.8,
           scoreBuild: 4.8,
           scoreUsability: 4.9,
           faqs: parsed.faqs || [
-            { question: 'O produto possui garantia nacional?', answer: 'Sim, garantia oficial de 12 meses pelo fabricante com nota fiscal.' }
-          ]
+            { question: `O ${finalTitle} possui garantia nacional?`, answer: 'Sim, garantia oficial pelo fabricante com nota fiscal.' }
+          ],
+          postKit: parsed.postKit || basePostKit
         };
 
         return new Response(JSON.stringify({ success: true, data }), {
@@ -334,10 +360,11 @@ Retorne JSON no formato:
       { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
     ];
 
+    const displayTitle = finalTitle.charAt(0).toUpperCase() + finalTitle.slice(1);
     const data = {
-      title: finalTitle.charAt(0).toUpperCase() + finalTitle.slice(1),
+      title: displayTitle,
       slug: slug || `produto-${Date.now()}`,
-      subtitle: `Análise técnica de especificações, durabilidade e custo-benefício em compras online.`,
+      subtitle: `Análise técnica de ${displayTitle}: especificações, durabilidade e custo-benefício na ${detectedStore}.`,
       category,
       coverImage: ogImage || '/src/assets/images/hero_tech_showcase_1792355762010.jpg',
       partnerStore: detectedStore,
@@ -345,26 +372,29 @@ Retorne JSON no formato:
       priceCurrent: extractedPrice || 'R$ 299,90',
       priceOriginal: extractedOriginalPrice || '',
       discountPercent: '',
+      rating: 4.8,
       pros: [
-        'Construção reforçada com acabamento de alta qualidade e durabilidade comprovada',
-        'Desempenho estável e ágil nas tarefas do dia a dia',
-        'Excelente custo-benefício em comparação com produtos equivalentes da categoria',
-        'Configuração descomplicada com compatibilidade universal'
+        `Boa proposta técnica de ${displayTitle} dentro da categoria ${category}`,
+        'Especificações equilibradas para uso diário contínuo sem comprometer eficiência',
+        `Oferta verificada com envio seguro pela loja parceira ${detectedStore}`,
+        'Garantia oficial de 12 meses com emissão de nota fiscal'
       ],
       cons: [
-        'Disponibilidade de cores e voltagem pode variar conforme o estoque da loja',
-        'Requer leitura rápida das instruções para aproveitar todos os recursos'
+        'Variações de voltagem, cor ou capacidade devem ser conferidas antes de finalizar a compra',
+        'Valor promocional sujeito à atualização de estoque do anunciante'
       ],
       specifications: fallbackSpecs,
-      content: `### Construção, Ergonomia e Acabamento\n\nO produto apresenta projeto sólido e cuidado nos detalhes de engenharia. Os encaixes são precisos e os materiais transmitem sensação imediata de confiabilidade.\n\n### Desempenho e Eficiência no Dia a Dia\n\nNos testes práticos de rotina, as funcionalidades operaram com estabilidade plena, entregando a performance anunciada sem superaquecimento ou falhas.\n\n### Relação Custo-Benefício e Veredito\n\nConsiderando a robustez dos componentes e o valor praticado na oferta atual, trata-se de uma recomendação sólida de compra para quem busca qualidade duradoura.`,
-      verdict: 'Uma recomendação sólida e segura de compra com alto índice de satisfação entre usuários.',
+      content: `### Construção, Ergonomia e Acabamento\n\nO ${displayTitle} apresenta projeto funcional voltado para quem busca praticidade e boa durabilidade na categoria ${category}. Os materiais e encaixes atendem bem às exigências do uso cotidiano.\n\n### Desempenho e Eficiência no Dia a Dia\n\nNa prática, o conjunto técnico de ${displayTitle} entrega resposta estável e compatível com a proposta da faixa de preço, evitando gargalos nas rotinas principais para as quais foi projetado.\n\n### Relação Custo-Benefício e Veredito\n\nCom oferta monitorada na ${detectedStore} por ${extractedPrice || 'valor promocional'}, o ${displayTitle} reúne equilíbrio entre recursos técnicos, garantia e segurança na compra.`,
+      verdict: `Compra recomendada para quem procura as especificações de ${displayTitle} com garantia oficial e bom custo-benefício na ${detectedStore}.`,
       scoreCostBenefit: 4.8,
       scorePerformance: 4.8,
       scoreBuild: 4.7,
       scoreUsability: 4.9,
       faqs: [
-        { question: 'O produto é original e possui garantia nacional?', answer: 'Sim, todos os itens adquiridos através das lojas oficiais parceiras contam com nota fiscal e garantia de 12 meses.' }
-      ]
+        { question: `O ${displayTitle} é original e possui garantia nacional?`, answer: `Sim, comprando pelo anúncio oficial da ${detectedStore} o produto acompanha nota fiscal eletrônica e garantia de 12 meses.` },
+        { question: `Vale a pena comprar o ${displayTitle} pelo preço atual?`, answer: `Na faixa de ${extractedPrice || 'oferta vigente'}, entrega um conjunto sólido frente aos concorrentes da categoria ${category}.` }
+      ],
+      postKit: basePostKit
     };
 
     return new Response(JSON.stringify({ success: true, data }), {

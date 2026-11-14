@@ -1,10 +1,16 @@
 import express from 'express';
-import type { Request, Response } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import {
+  generateFullProductReview,
+  generateComparisonGuideWithAI,
+  generatePostKitWithAI,
+  GuideInputProduct,
+} from './server/aiEngine.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,1501 +19,689 @@ dotenv.config();
 
 const app = express();
 app.set('trust proxy', true);
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
-const apiKey = process.env.GEMINI_API_KEY || '';
-const ai = new GoogleGenAI({
-  apiKey,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    }
+async function resolveAvailableCategories(passedCategories?: unknown): Promise<string[]> {
+  if (Array.isArray(passedCategories)) {
+    const cleaned = passedCategories
+      .map((c) => (typeof c === 'string' ? c.trim() : typeof c?.name === 'string' ? c.name.trim() : ''))
+      .filter(Boolean);
+    if (cleaned.length > 0) return cleaned;
   }
-});
-
-// Tipos de produto categorizados
-type ProductType = 'WATCH' | 'TV' | 'AUDIO' | 'PERIPHERAL' | 'NOTEBOOK' | 'KITCHEN' | 'SMARTPHONE' | 'MOBILITY' | 'GENERAL';
-
-// Identifica a plataforma de e-commerce pelo link
-function detectStore(urlOrText: string): string {
-  if (/amazon\.com(\.br)?|amzn\.to|(^|https?:\/\/|\.)a\.co(\/|$)/i.test(urlOrText)) return 'Amazon Brasil';
-  if (/mercadolivre\.com(\.br)?|meli\.la|produto\.mercadolivre/i.test(urlOrText)) return 'Mercado Livre';
-  if (/shopee\.com(\.br)?|s\.shopee/i.test(urlOrText)) return 'Shopee Oficial';
-  if (/magazineluiza\.com(\.br)?|magazinevoce\.com\.br|magalu\.me|magalu/i.test(urlOrText)) return 'Magazine Luiza';
-  if (/aliexpress\.com/i.test(urlOrText)) return 'AliExpress';
-  if (/kabum\.com(\.br)?/i.test(urlOrText)) return 'KaBuM!';
-  if (/casasbahia\.com(\.br)?/i.test(urlOrText)) return 'Casas Bahia';
-  return 'Loja Parceira Oficial';
-}
-
-// Limpa títulos brutos removendo nomes de lojas de afiliados e branding
-function cleanProductTitle(raw: string): string {
-  if (!raw || typeof raw !== 'string') return '';
-
-  // Decodifica entidades HTML básicas
-  let text = raw
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .trim();
-
-  // Se for tela de verificação de segurança (Cloudflare, ML verification, Magalu, Amazon robot check) ou nome puro de marketplace, descarta totalmente
-  if (/verificação|acessou nosso site|segurança|navegação segura|proteger seus dados|etapa simples e rápida|robot check|captcha|cloudflare|access denied|algo deu errado|404|login|^mercado\s*li[bv]re|^shopee(\s*brasil)?$|^amazon(\.com\.br)?|serviço indisponível|não é possível acessar/i.test(text.trim())) {
-    return '';
-  }
-
-  // Divide o título por separadores usuais em e-commerce (| , - , — , • , :)
-  const segments = text.split(/\s+[|\-—•]\s+|\s*\|\s*|\s*:\s*/).map(s => s.trim()).filter(Boolean);
-
-  // Filtra segmentos que são puramente lojas, nomes de afiliados ou slogans
-  const filtered = segments.filter(seg => {
-    // Lojas de afiliados como "Magazine NomeDoAfiliado", "Magazine Você", "Magazine Luiza"
-    if (/^(magazine\s+[a-z0-9_-]+|magazine\s*voc[eê]|magazine\s*luiza)$/i.test(seg)) return false;
-    // Padrões de lojas personalizadas de afiliados
-    if (/^(loja\s+(do|da|de)?\s*[a-z0-9_ -]+|vitrine\s+[a-z0-9_ -]+|espa[cç]o\s+[a-z0-9_ -]+|achados\s+(do|da|de)?\s*[a-z0-9_ -]+)$/i.test(seg)) return false;
-    // Grandes plataformas no título
-    if (/^(amazon(\.com\.br)?|mercado\s*li[bv]re|shopee(\s*brasil)?|aliexpress|kabum!?|casas\s*bahia|americanas|submarino)$/i.test(seg)) return false;
-    // Slogans de venda genéricos
-    if (/^(compre online|frete gr[aá]tis|em promo[cç][aã]o|melhor pre[cç]o|ofertas? da semana|loja oficial|oferta imperd[ií]vel)$/i.test(seg)) return false;
-    // Erros e bots
-    if (/^(404|erro|p[aá]gina n[aã]o|algo deu errado|robot check|captcha|acesso negado|verificação)$/i.test(seg)) return false;
-    return true;
-  });
-
-  if (filtered.length > 0) {
-    // Escolhe o segmento que possui mais palavras ou menções a produtos reais
-    const bestSegment = filtered.sort((a, b) => {
-      const aWords = a.split(/\s+/).length;
-      const bWords = b.split(/\s+/).length;
-      const aKeywords = /rel[oó]gio|smartwatch|watch|tv|fone|teclado|celular|air fryer|bicicleta|bike|scooter|soundbar|aspirador/i.test(a) ? 3 : 0;
-      const bKeywords = /rel[oó]gio|smartwatch|watch|tv|fone|teclado|celular|air fryer|bicicleta|bike|scooter|soundbar|aspirador/i.test(b) ? 3 : 0;
-      return (bWords + bKeywords) - (aWords + aKeywords);
-    })[0];
-
-    // Remove prefixos de loja residuais no segmento escolhido
-    return bestSegment
-      .replace(/^(magazine\s+[a-z0-9_-]+|loja\s+[a-z0-9_-]+)\s*[-:]?\s*/gi, '')
-      .replace(/\s*[-:]?\s*(no\s+mercado\s+livre|na\s+shopee|na\s+amazon|no\s+magalu).*$/gi, '')
-      .trim();
-  }
-
-  // Fallback se não sobrou nenhum segmento: limpa prefixos da string completa
-  const cleanedFull = text
-    .replace(/^(magazine\s+[a-z0-9_-]+|loja\s+[a-z0-9_-]+)\s*[|\-:]\s*/gi, '')
-    .replace(/\s*[|\-:]\s*(magazine\s+[a-z0-9_-]+|amazon|mercado\s*li[bv]re|shopee|kabum).*$/gi, '')
-    .trim();
-
-  if (/^(mercado\s*li[bv]re|shopee(\s*brasil)?|amazon|magalu|magazine\s*luiza)$/i.test(cleanedFull)) {
-    return '';
-  }
-  return cleanedFull;
-}
-
-// Formata o slug limpo em título capitalizado em português
-function formatSlugAsTitle(slug: string): string {
-  if (!slug) return '';
-  return slug
-    .split(/\s+/)
-    .map(word => {
-      const lower = word.toLowerCase();
-      if (/^(de|da|do|dos|das|e|em|com|para|a|o|as|os)$/.test(lower)) return lower;
-      if (/^relogio$/i.test(lower)) return 'Relógio';
-      if (/^agua$/i.test(lower)) return 'à Água';
-      if (/^resiste(nte)?$/i.test(lower)) return 'Resistente';
-      if (/^eletrica$/i.test(lower)) return 'Elétrica';
-      if (/^mecanico$/i.test(lower)) return 'Mecânico';
-      if (/^fones?$/i.test(lower)) return 'Fone';
-      if (/^ruido$/i.test(lower)) return 'Ruído';
-      if (/^televisao$/i.test(lower)) return 'Televisão';
-      if (/^bicicleta$/i.test(lower)) return 'Bicicleta';
-      if (/^dobravel$/i.test(lower)) return 'Dobrável';
-      return lower.charAt(0).toUpperCase() + lower.slice(1);
-    })
-    .join(' ')
-    .replace(/\s+à\s+Água\s+à\s+Água/gi, ' à Água')
-    .replace(/\s+a\s+agua/gi, ' à Água');
-}
-
-// Extrai tokens e nome legível do produto a partir de URLs ignorando lojas de afiliados e encurtadores
-function extractSlugWords(url: string): string {
   try {
-    const parsed = new URL(url);
-
-    // Se o host for encurtador de afiliados conhecido, NUNCA usa o token hash como nome do produto!
-    if (/^(s\.shopee|amzn\.to|a\.co|meli\.la|magalu\.me|bit\.ly|tinyurl\.com|t\.co|goo\.gl|cutt\.ly|linktr\.ee)$/i.test(parsed.hostname)) {
-      return '';
-    }
-
-    // Se for URL com redirecionamento de verificação do Mercado Livre (?go=...)
-    if (parsed.searchParams.has('go')) {
-      const goParam = decodeURIComponent(parsed.searchParams.get('go') || '');
-      if (/^https?:\/\//i.test(goParam)) {
-        return extractSlugWords(goParam);
-      }
-    }
-
-    const pathParts = parsed.pathname.split('/').filter(Boolean);
-
-    // Segmentos a ignorar (nomes de lojas de afiliados, diretórios do sistema e identificadores)
-    const candidates = pathParts.filter(part => {
-      // Ignora diretórios comuns de lojas afiliadas (ex: /magazineminhaloja/)
-      if (/^magazine[a-z0-9_-]*$/i.test(part)) return false;
-      if (/^(shop|store|loja|vitrine|afiliado[s]?|afiliada[s]?|parceiro[s]?|vendedor|seller|user|perfil|u)$/i.test(part)) return false;
-      // Ignora rotas de sistema e de verificação
-      if (/^(dp|gp|product|produto|produtos|item|itens|p|sec|s|b|c|d|br|pt|opaanlp|gz|account-verification|verify)$/i.test(part)) return false;
-      // Ignora hashes, códigos hexadecimais ou IDs numéricos (ex: 1234567, MLB123456)
-      if (/^(MLB[0-9]+|[0-9a-f]{8,}|[0-9]{4,})$/i.test(part)) return false;
-      // Rejeita tokens alfanuméricos sem separadores (hífen, underline, espaço) com menos de 18 caracteres (hashes de curto link)
-      if (!/[-_+% ]/.test(part) && part.length < 18) return false;
-      return true;
-    });
-
-    if (candidates.length === 0) return '';
-
-    // Encontra o segmento com maior contagem de palavras separadas por hífen
-    const bestPart = candidates.sort((a, b) => {
-      const aWordCount = a.split(/[-_+]/).length;
-      const bWordCount = b.split(/[-_+]/).length;
-      const aHasKeywords = /rel[oó]gio|smartwatch|watch|tv|fone|teclado|celular|airfryer|fritadeira|bicicleta|bike|scooter/i.test(a) ? 3 : 0;
-      const bHasKeywords = /rel[oó]gio|smartwatch|watch|tv|fone|teclado|celular|airfryer|fritadeira|bicicleta|bike|scooter/i.test(b) ? 3 : 0;
-      return (bWordCount + bHasKeywords) - (aWordCount + aHasKeywords);
-    })[0];
-
-    if (bestPart) {
-      const cleaned = decodeURIComponent(bestPart)
-        .replace(/^MLB[-_]?[0-9]+[-_]?/i, '') // Remove código MLB-123456
-        .replace(/[-_]JM$/i, '') // Remove sufixo _JM
-        .replace(/[-_+]/g, ' ')
-        .replace(/[0-9a-f]{8,}/gi, '')
-        .trim();
-      if (cleaned.length > 3) return formatSlugAsTitle(cleaned);
-    }
+    const catalog = await getSeoCatalog();
+    const cats = (catalog.categories || []).map((c: any) => String(c?.name || '').trim()).filter(Boolean);
+    if (cats.length > 0) return cats;
   } catch {
-    // Não é URL válida
+    // Fallback para lista padrão
   }
-  return '';
+  return [
+    'Áudio & Fones',
+    'Informática & Periféricos',
+    'Utilidades',
+    'Casa Inteligente',
+    'Relógios & Smartwatches',
+    'Tecnologia & Dispositivos',
+  ];
 }
 
-// Utilitários robustos de formatação e cálculo matemático de preços em BRL
-function parsePriceToNumber(val: string | number | null | undefined): number | null {
-  if (val === null || val === undefined) return null;
-  if (typeof val === 'number') return isNaN(val) ? null : val;
-  const str = String(val).trim();
-  if (!str) return null;
-
-  const clean = str.replace(/[^\d.,]/g, '');
-  if (!clean) return null;
-
-  if (clean.includes('.') && clean.includes(',')) {
-    const normalized = clean.replace(/\./g, '').replace(',', '.');
-    const n = parseFloat(normalized);
-    return isNaN(n) ? null : n;
-  }
-
-  if (clean.includes(',')) {
-    const normalized = clean.replace(',', '.');
-    const n = parseFloat(normalized);
-    return isNaN(n) ? null : n;
-  }
-
-  if (clean.includes('.')) {
-    const parts = clean.split('.');
-    if (parts.length === 2 && parts[1].length === 3 && parts[0].length <= 3) {
-      const n = parseFloat(clean.replace(/\./g, ''));
-      return isNaN(n) ? null : n;
-    }
-    const n = parseFloat(clean);
-    return isNaN(n) ? null : n;
-  }
-
-  const n = parseFloat(clean);
-  return isNaN(n) ? null : n;
-}
-
-function formatBRL(num: number): string {
-  if (isNaN(num)) return 'R$ 0,00';
-  return `R$ ${num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function calculateDiscountHelper(
-  current: string | number | null | undefined,
-  original: string | number | null | undefined
-): { percent: number; label: string } | null {
-  const currNum = parsePriceToNumber(current);
-  const origNum = parsePriceToNumber(original);
-
-  if (currNum === null || origNum === null) return null;
-  if (origNum <= 0 || currNum <= 0) return null;
-  if (currNum >= origNum) return { percent: 0, label: '' };
-
-  const rawPercent = ((origNum - currNum) / origNum) * 100;
-  const rounded = Math.round(rawPercent);
-
-  if (rounded <= 0) return { percent: 0, label: '' };
-  return {
-    percent: rounded,
-    label: `${rounded}% de desconto`
-  };
-}
-
-// Scraper resiliente para extrair metadados e preços reais da página do produto
-async function scrapeUrlMetadata(targetUrl: string) {
-  let resolvedUrl = targetUrl;
-  let pageTitle = '';
-  let metaDescription = '';
-  let ogImage = '';
-  let extractedPrice = '';
-  let extractedOriginalPrice = '';
-  let slugTitle = extractSlugWords(targetUrl);
-  let extractedSnippet = '';
-
-  const isShopee = /shopee\.com(\.br)?|s\.shopee/i.test(targetUrl);
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
-
-    const headers: Record<string, string> = isShopee
-      ? {
-          'User-Agent': 'WhatsApp/2.21.12.21 A',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8'
-        }
-      : {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8',
-          'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124"',
-          'sec-ch-ua-mobile': '?0',
-          'sec-ch-ua-platform': '"Windows"'
-        };
-
-    const res = await fetch(targetUrl, {
-      signal: controller.signal,
-      redirect: 'follow',
-      headers
-    });
-
-    clearTimeout(timeout);
-    resolvedUrl = res.url || targetUrl;
-
-    // Se o Mercado Livre redirecionou para account-verification, recupera a URL de destino pelo parâmetro ?go=
-    if (resolvedUrl.includes('account-verification') && resolvedUrl.includes('go=')) {
-      try {
-        const u = new URL(resolvedUrl);
-        const goTarget = u.searchParams.get('go');
-        if (goTarget) {
-          resolvedUrl = decodeURIComponent(goTarget);
-          if (!slugTitle) {
-            slugTitle = extractSlugWords(resolvedUrl);
-          }
-        }
-      } catch {
-        resolvedUrl = targetUrl;
-      }
-    }
-
-    if (!slugTitle) {
-      slugTitle = extractSlugWords(resolvedUrl);
-    }
-
-    const html = await res.text();
-
-    // 1. Tenta extrair JSON-LD com dados de Produto e Preço Oficial
-    try {
-      const jsonLdMatches = html.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
-      if (jsonLdMatches) {
-        for (const block of jsonLdMatches) {
-          const content = block.replace(/<script[^>]*>|<\/script>/gi, '').trim();
-          const parsedLd = JSON.parse(content);
-          
-          // Suporte a objetos individuais, arrays ou @graph
-          const items: any[] = [];
-          if (Array.isArray(parsedLd)) {
-            items.push(...parsedLd);
-          } else if (parsedLd && Array.isArray(parsedLd['@graph'])) {
-            items.push(...parsedLd['@graph']);
-          } else if (parsedLd) {
-            items.push(parsedLd);
-          }
-
-          const productItem = items.find(i => i && (i['@type'] === 'Product' || i['@type'] === 'IndividualProduct'));
-          if (productItem) {
-            if (productItem.name && !pageTitle) {
-              pageTitle = cleanProductTitle(productItem.name);
-            }
-            if (productItem.image && !ogImage) {
-              ogImage = Array.isArray(productItem.image) ? productItem.image[0] : (typeof productItem.image === 'string' ? productItem.image : productItem.image?.url || '');
-            }
-            if (productItem.description && !metaDescription) {
-              metaDescription = productItem.description;
-            }
-            if (productItem.offers) {
-              const offersList = Array.isArray(productItem.offers) ? productItem.offers : [productItem.offers];
-              for (const offer of offersList) {
-                const rawPrice = offer?.price ?? offer?.lowPrice;
-                if (rawPrice !== undefined && rawPrice !== null && !extractedPrice) {
-                  const pNum = parsePriceToNumber(rawPrice);
-                  if (pNum && pNum > 0) {
-                    extractedPrice = formatBRL(pNum);
-                  }
-                }
-                const rawHigh = offer?.highPrice ?? offer?.priceSpecification?.maxPrice;
-                if (rawHigh !== undefined && rawHigh !== null && !extractedOriginalPrice) {
-                  const hNum = parsePriceToNumber(rawHigh);
-                  if (hNum && hNum > 0) {
-                    extractedOriginalPrice = formatBRL(hNum);
-                  }
-                }
-              }
-            }
-            if (extractedPrice) break;
-          }
-        }
-      }
-    } catch {
-      // JSON-LD malformado ou parcial, continua com seletores de lojas
-    }
-
-    // 2. Extração de Preço em Metatags do E-commerce
-    if (!extractedPrice) {
-      const metaPriceMatch = html.match(/<meta[^>]+(?:property|name|itemprop)=["'](?:product:price:amount|og:price:amount|price|twitter:data1)["'][^>]+content=["']([^"']+)["']/i)
-        || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name|itemprop)=["'](?:product:price:amount|og:price:amount|price|twitter:data1)["']/i);
-      if (metaPriceMatch && metaPriceMatch[1]) {
-        const pNum = parsePriceToNumber(metaPriceMatch[1]);
-        if (pNum && pNum > 0) {
-          extractedPrice = formatBRL(pNum);
-        }
-      }
-    }
-
-    // 3. Mercado Livre: Oferta Atual em ui-pdp-price__second-line ou andes-money-amount
-    if (!extractedPrice) {
-      // Prioridade: segundo bloco de preço (preço de venda real com desconto aplicado)
-      const mlSecondLineMatch = html.match(/ui-pdp-price__second-line[\s\S]*?andes-money-amount__fraction[^"']*["']>([\d.,]+)<\/span>/i);
-      if (mlSecondLineMatch && mlSecondLineMatch[1]) {
-        const frac = mlSecondLineMatch[1].replace(/\./g, '');
-        const centsMatch = mlSecondLineMatch[0].match(/andes-money-amount__cents[^"']*["']>(\d{2})<\/span>/i);
-        const cents = centsMatch ? centsMatch[1] : '00';
-        const num = parseFloat(`${frac}.${cents}`);
-        if (!isNaN(num) && num > 0) {
-          extractedPrice = formatBRL(num);
-        }
-      }
-    }
-
-    if (!extractedPrice) {
-      const mlFractionMatch = html.match(/class=["'][^"']*andes-money-amount__fraction[^"']*["']>([\d.,]+)<\/span>/i);
-      if (mlFractionMatch && mlFractionMatch[1]) {
-        const frac = mlFractionMatch[1].replace(/\./g, '');
-        const mlCentsMatch = html.match(/class=["'][^"']*andes-money-amount__cents[^"']*["']>(\d{2})<\/span>/i);
-        const cents = mlCentsMatch ? mlCentsMatch[1] : '00';
-        const num = parseFloat(`${frac}.${cents}`);
-        if (!isNaN(num) && num > 0) {
-          extractedPrice = formatBRL(num);
-        }
-      }
-    }
-
-    // Mercado Livre: Preço Original anterior (andes-money-amount--previous)
-    if (!extractedOriginalPrice) {
-      const mlPrevMatch = html.match(/andes-money-amount--previous[\s\S]*?andes-money-amount__fraction[^"']*["']>([\d.,]+)<\/span>/i);
-      if (mlPrevMatch && mlPrevMatch[1]) {
-        const frac = mlPrevMatch[1].replace(/\./g, '');
-        const num = parseFloat(frac);
-        if (!isNaN(num) && num > 0) {
-          extractedOriginalPrice = formatBRL(num);
-        }
-      }
-    }
-
-    // 4. Amazon: .priceToPay ou #corePrice_feature_div ou .a-offscreen
-    if (!extractedPrice) {
-      const amzPriceMatch = html.match(/class=["'][^"']*(?:priceToPay|apexPriceToPay)[^"']*["'][\s\S]*?class=["'][^"']*a-offscreen[^"']*["']>\s*R\$\s*([\d.,]+)\s*<\/span>/i)
-        || html.match(/class=["'][^"']*a-offscreen[^"']*["']>\s*R\$\s*([\d.,]+)\s*<\/span>/i);
-      if (amzPriceMatch && amzPriceMatch[1]) {
-        const pNum = parsePriceToNumber(amzPriceMatch[1]);
-        if (pNum && pNum > 0) {
-          extractedPrice = formatBRL(pNum);
-        }
-      }
-    }
-
-    // Amazon: Preço Original (.basisPrice ou .a-text-price)
-    if (!extractedOriginalPrice) {
-      const amzOrigMatch = html.match(/class=["'][^"']*(?:basisPrice|a-text-price)[^"']*["'][\s\S]*?class=["'][^"']*a-offscreen[^"']*["']>\s*R\$\s*([\d.,]+)\s*<\/span>/i);
-      if (amzOrigMatch && amzOrigMatch[1]) {
-        const hNum = parsePriceToNumber(amzOrigMatch[1]);
-        if (hNum && hNum > 0) {
-          extractedOriginalPrice = formatBRL(hNum);
-        }
-      }
-    }
-
-    // 5. Shopee: price em centavos ou JSON da página
-    if (!extractedPrice) {
-      const shopeeJsonPrice = html.match(/["']price["']\s*:\s*(\d{7,10})\b/);
-      if (shopeeJsonPrice && shopeeJsonPrice[1]) {
-        const inUnits = parseInt(shopeeJsonPrice[1], 10) / 100000;
-        if (!isNaN(inUnits) && inUnits > 0) {
-          extractedPrice = formatBRL(inUnits);
-        }
-      }
-    }
-
-    // 6. Magalu e Genéricos: data-testid="price-value" ou regex R$
-    if (!extractedPrice) {
-      const generalRMatch = html.match(/data-testid=["'](?:price-value|price-default|heading-price)["'][^>]*>\s*R\$\s*([\d.,]+)/i)
-        || html.match(/["'](?:price|salePrice|currentPrice|offerPrice)["']\s*:\s*["']?(\d+(?:\.\d{1,2})?)["']?/i);
-      if (generalRMatch && generalRMatch[1]) {
-        const pNum = parsePriceToNumber(generalRMatch[1]);
-        if (pNum && pNum > 0) {
-          extractedPrice = formatBRL(pNum);
-        }
-      }
-    }
-
-    // Magalu: Preço Original
-    if (!extractedOriginalPrice) {
-      const magaluOrig = html.match(/data-testid=["'](?:price-original|original-price)["'][^>]*>\s*R\$\s*([\d.,]+)/i);
-      if (magaluOrig && magaluOrig[1]) {
-        const hNum = parsePriceToNumber(magaluOrig[1]);
-        if (hNum && hNum > 0) {
-          extractedOriginalPrice = formatBRL(hNum);
-        }
-      }
-    }
-
-    // 7. Regex de Fallback em Descrições (ex: "de R$ 598 por apenas R$ 197,22")
-    if (!extractedPrice) {
-      const descPriceMatch = html.match(/(?:por|apenas|oferta)\s*:?\s*R\$\s*([\d]{1,3}(?:\.[\d]{3})*,\d{2}|\d+,\d{2})/i);
-      if (descPriceMatch && descPriceMatch[1]) {
-        const pNum = parsePriceToNumber(descPriceMatch[1]);
-        if (pNum && pNum > 0) {
-          extractedPrice = formatBRL(pNum);
-        }
-      }
-    }
-
-    // Extrai tag <h1> do produto
-    if (!pageTitle) {
-      const h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-      if (h1Match && h1Match[1]) {
-        const rawH1 = h1Match[1].replace(/<[^>]+>/g, '').trim();
-        const cleanedH1 = cleanProductTitle(rawH1);
-        if (cleanedH1 && cleanedH1.length > 5 && !/algo deu errado|n[aã]o encontrado|404|login|robot check|mercado\s*li[bv]re/i.test(cleanedH1)) {
-          pageTitle = cleanedH1;
-        }
-      }
-    }
-
-    // Extrai og:title
-    if (!pageTitle) {
-      const ogTitleMatch = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) 
-        || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
-      if (ogTitleMatch && ogTitleMatch[1]) {
-        const cleanedOg = cleanProductTitle(ogTitleMatch[1]);
-        if (cleanedOg && cleanedOg.length > 5 && !/algo deu errado|n[aã]o encontrado|robot check|mercado\s*li[bv]re/i.test(cleanedOg)) {
-          pageTitle = cleanedOg;
-        }
-      }
-    }
-
-    // Extrai <title>
-    if (!pageTitle) {
-      const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-      if (titleMatch && titleMatch[1]) {
-        const cleanedTitle = cleanProductTitle(titleMatch[1]);
-        if (cleanedTitle && cleanedTitle.length > 5 && !/algo deu errado|n[aã]o encontrado|robot check|404|mercado\s*li[bv]re/i.test(cleanedTitle)) {
-          pageTitle = cleanedTitle;
-        }
-      }
-    }
-
-    // Se o resultado final for tela de verificação ou login, descarta o título falso
-    if (resolvedUrl.includes('account-verification') || resolvedUrl.includes('/login') || /^(mercado\s*li[bv]re|acesse sua conta)/i.test(pageTitle)) {
-      pageTitle = '';
-    }
-
-    // Extrai og:description
-    const ogDescMatch = html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i)
-      || html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i);
-    if (ogDescMatch && ogDescMatch[1] && !metaDescription) {
-      metaDescription = ogDescMatch[1].trim();
-    }
-
-    // Extrai og:image
-    if (!ogImage) {
-      const ogImgMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
-      if (ogImgMatch && ogImgMatch[1] && /^https?:\/\//i.test(ogImgMatch[1])) {
-        ogImage = ogImgMatch[1];
-      }
-    }
-
-    // Extrai trecho de texto da página com especificações ou recursos
-    extractedSnippet = '';
-    const cleanBody = html
-      .replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[\s\S]*?<\/style>/gi, '')
-      .replace(/<noscript[\s\S]*?<\/noscript>/gi, '');
-
-    const specsBlockMatch = cleanBody.match(/(?:caracter[íi]sticas|especifica[çc][õo]es|ficha t[ée]cnica|detalhes t[ée]cnicos|technical details|feature-bullets)[\s\S]{100,2500}/i);
-    if (specsBlockMatch) {
-      extractedSnippet = specsBlockMatch[0].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1500);
-    } else if (metaDescription) {
-      extractedSnippet = metaDescription.slice(0, 1500);
-    }
-  } catch (scrapeErr) {
-    // Timeout ou erro de conexão tolerado
-  }
-
-  return {
-    resolvedUrl,
-    pageTitle,
-    metaDescription,
-    ogImage,
-    slugTitle,
-    extractedPrice,
-    extractedOriginalPrice,
-    extractedSnippet
-  };
-}
-
-// Classificador inteligente de nicho do produto
-function classifyProduct(allText: string): ProductType {
-  const t = allText.toLowerCase();
-
-  // Mobilidade Urbana, Bicicletas e Veículos Elétricos
-  if (/\b(bicicleta|bike|bici|patinete|scooter|e-bike|ebike|monociclo|hoverboard|moto el[eé]trica|cavalos?|tripulado|pedal|ciclismo)\b/i.test(t)) {
-    return 'MOBILITY';
-  }
-
-  // Relógios e Smartwatches (prioridade máxima se contiver palavras de relógio)
-  if (/\b(rel[oó]gio|smartwatch|smart[ -]?band|watch|pulso|cron[oó]grafo|inviolavel|technos|casio|amazfit|galaxy watch|apple watch|g-shock|invicta|mormaii|mi band|garmin|fitbit|smart watch)\b/i.test(t)) {
-    return 'WATCH';
-  }
-
-  // Fones e Áudio
-  if (/\b(fone|fones|headphone|headset|earphone|airpods|caixa de som|bluetooth speaker|jbl|som port[aá]til|earbuds|caixinha de som|soundbar)\b/i.test(t)) {
-    return 'AUDIO';
-  }
-
-  // Notebooks e Laptops (prioritário antes de periféricos genéricos)
-  if (/\b(notebook|laptop|macbook|ultrabook|chromebook|aspire|ideapad|thinkpad|dell inspiron|nitro\s*5|vivobook|galaxy book)\b/i.test(t)) {
-    return 'NOTEBOOK';
-  }
-
-  // Periféricos e Informática
-  if (/\b(teclado|mouse|monitor|gabinete|switch mec[aâ]nico|mousepad|webcam|computador|pc gamer|ssd|placa de v[ií]deo|gpu|hardware)\b/i.test(t)) {
-    return 'PERIPHERAL';
-  }
-
-  // Cozinha e Casa Inteligente
-  if (/\b(fritadeira|air[ -]?fryer|cafeteira|liquidificador|panela el[eé]trica|rob[oô] aspirador|aspirador|l[aâ]mpada inteligente)\b/i.test(t)) {
-    return 'KITCHEN';
-  }
-
-  // Televisores / Smart TVs
-  if (/\b(smart[ -]?tv|televis[aã]o|televisor|\btv\b|oled|qled|roku tv|ambilight|neo qled)\b/i.test(t)) {
-    return 'TV';
-  }
-
-  // Smartphones e Celulares
-  if (/\b(celular|smartphone|iphone|galaxy s|galaxy a|redmi|poco|motorola edge|xiaomi)\b/i.test(t)) {
-    return 'SMARTPHONE';
-  }
-
-  return 'GENERAL';
-}
-
-function generateSlug(text: string): string {
-  return text
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)+/g, '');
-}
-
-// Geradores Especializados por Nicho
-function buildMobilityData(titleHint: string, store: string, ogImage?: string, priceHint?: string, originalPriceHint?: string, snippetHint?: string) {
-  const cleanTitle = (titleHint && titleHint.length > 5 && !/^(magazine|loja|afiliad)/i.test(titleHint))
-    ? titleHint.charAt(0).toUpperCase() + titleHint.slice(1)
-    : 'Bicicleta Elétrica Dobrável com Bateria de Lítio e Motor Potente';
-
-  const slug = generateSlug(cleanTitle) || 'bicicleta-eletrica-dobravel';
-  const priceCurrent = priceHint || 'R$ 1.899,00';
-  const priceOriginal = originalPriceHint || 'R$ 2.499,00';
-  const autoDiscount = calculateDiscountHelper(priceCurrent, priceOriginal);
-
-  // Extrai potência, voltagem e características técnicas do snippet se existirem
-  const potMatch = snippetHint?.match(/(\d{3,4}\s*W)/i);
-  const voltMatch = snippetHint?.match(/(\d{2,3}\s*V)/i);
-  const autoMatch = snippetHint?.match(/(\d{2}[-–]\d{2}\s*km|\d{2}\s*km)/i);
-  const pneuMatch = snippetHint?.match(/(\d{2}\s*polegadas|\d{2}")/i);
-  const velMatch = snippetHint?.match(/(?:velocidade\s*(?:m[áa]xima)?|at[ée])\s*(\d{2}\s*km\/h)/i);
-
-  const motorPower = potMatch ? potMatch[1] : '400W de alta eficiência';
-  const batteryVoltage = voltMatch ? `${voltMatch[1]} Bateria de Lítio Removível` : '48V Bateria de Lítio Removível';
-  const autonomy = autoMatch ? `${autoMatch[1]} por carga completa` : '20 a 30 km por carga completa';
-  const wheels = pneuMatch ? `${pneuMatch[1]} a vácuo antiderrapantes` : 'Pneus aro 14" antiderrapantes e anti-furo';
-  const maxSpeed = velMatch ? velMatch[1] : '25 km/h';
-
-  return {
-    title: cleanTitle,
-    slug,
-    subtitle: 'Análise detalhada de motor elétrico, autonomia da bateria de lítio, sistema dobrável e segurança no trânsito urbano.',
-    category: 'Mobilidade & Esportes',
-    coverImage: ogImage || '/src/assets/images/hero_tech_showcase_1792355762010.jpg',
-    partnerStore: store,
-    priceCurrent,
-    priceOriginal,
-    discountPercent: autoDiscount?.label || '',
-    pros: [
-      'Estrutura dobrável ultra compacta que facilita o transporte no porta-malas ou armazenamento em apartamentos',
-      `Motor elétrico eficiente de ${motorPower} com aceleração progressiva e velocidade de até ${maxSpeed}`,
-      `Bateria de lítio removível com autonomia de ${autonomy}, ideal para percursos de trabalho e estudos`,
-      'Freios a disco mecânico duplo (dianteiro e traseiro) que oferecem frenagem firme em qualquer tipo de piso'
-    ],
-    cons: [
-      'Subidas muito acentuadas podem requerer pedal assistido conjunto para manter velocidade constante',
-      'Tempo de carregamento completo da bateria leva em média de 4 a 6 horas em tomada comum'
-    ],
-    specifications: [
-      { label: 'Motor e Potência', value: motorPower },
-      { label: 'Bateria e Alimentação', value: `${batteryVoltage} (Bivolt 110V/220V)` },
-      { label: 'Autonomia Estimada', value: autonomy },
-      { label: 'Velocidade Máxima', value: `Até ${maxSpeed} com piloto automático/seletor` },
-      { label: 'Rodas e Pneus', value: wheels },
-      { label: 'Sistema de Frenagem', value: 'Freios a disco duplo (dianteiro e traseiro)' },
-      { label: 'Capacidade de Carga', value: 'Suporta até 150 kg com estabilidade' },
-      { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
-    ],
-    content: `### Design Dobrável, Materiais e Construção\n\nA bicicleta elétrica apresenta quadro reforçado em aço com trava de engate rápido que dispensa ferramentas para dobrar. Ocupa espaço reduzido, ideal para quem mora em apartamento, condomínio ou precisa colocar o veículo no porta-malas do carro.\n\n### Desempenho do Motor, Bateria Removível e Autonomia Urbana\n\nO motor de ${motorPower} oferece arrancadas ágeis e torque suficiente para o trânsito da cidade. O grande destaque prático é a bateria removível: você pode destravá-la com a chave e levá-la para carregar em qualquer tomada de casa ou do trabalho sem precisar transportar a bike toda.\n\n### Segurança, Iluminação Noturna e Veredito\n\nConta com farol dianteiro em LED de alta intensidade, refletores de sinalização traseiros e buzina integrada. A economia gerada no transporte urbano diário frente aos gastos com combustível ou passagens torna este investimento extremamente vantajoso.`,
-    verdict: 'Uma solução excelente de mobilidade urbana prática, econômica e sustentável. Destaca-se pela bateria removível, freios a disco duplos e facilidade para guardar dobrada.',
-    scoreCostBenefit: 4.9,
-    scorePerformance: 4.8,
-    scoreBuild: 4.8,
-    scoreUsability: 4.9,
-    faqs: [
-      { question: 'A bateria pode ser removida para carregar separadamente?', answer: 'Sim, a bateria conta com chave de segurança própria e pode ser retirada facilmente para carregar em qualquer tomada 110V ou 220V.' },
-      { question: 'É possível pedalar normalmente se a bateria descarregar?', answer: 'Sim, a bicicleta possui pedais mecânicos funcionais com pedivela normal, funcionando como uma bicicleta tradicional caso acabe a carga.' },
-      { question: 'Pode ser utilizada em dias de chuva?', answer: 'Sim, a fiação e os módulos elétricos contam com vedação resistente a respingos e chuvas urbanas.' }
-    ]
-  };
-}
-function buildWatchData(titleHint: string, store: string, ogImage?: string, priceHint?: string, originalPriceHint?: string) {
-  const cleanTitle = (titleHint && titleHint.length > 5 && !/^(magazine|loja|afiliad)/i.test(titleHint))
-    ? titleHint.charAt(0).toUpperCase() + titleHint.slice(1)
-    : 'Relógio Inteligente Smartwatch com Tela AMOLED e Monitor Cardíaco';
-
-  const slug = generateSlug(cleanTitle) || 'relogio-smartwatch-inteligente';
-  const priceCurrent = priceHint || 'R$ 197,22';
-  const priceOriginal = originalPriceHint || 'R$ 299,00';
-  const autoDiscount = calculateDiscountHelper(priceCurrent, priceOriginal);
-
-  return {
-    title: cleanTitle,
-    slug,
-    subtitle: 'Análise detalhada de precisão de sensores cardíacos, resistência à água 5 ATM e bateria de até 14 dias.',
-    category: 'Relógios & Smartwatches',
-    coverImage: ogImage || '/src/assets/images/review_smartwatch_1792358371097.jpg',
-    partnerStore: store,
-    priceCurrent,
-    priceOriginal,
-    discountPercent: autoDiscount?.label || '',
-    pros: [
-      'Bateria com autonomia duradoura de até 14 dias em uso diário moderado',
-      'Tela AMOLED nítida com ótima legibilidade mesmo sob luz solar forte',
-      'Monitoramento contínuo de frequência cardíaca, oxímetro SpO2 e qualidade do sono',
-      'Resistência à água com certificação para uso em treinos, chuva e natação'
-    ],
-    cons: [
-      'Histórico completo de métricas corporais exige manter o aplicativo sincronizado diariamente',
-      'Modelos de entrada realizam controle de músicas mas não armazenam faixas para reprodução offline'
-    ],
-    specifications: [
-      { label: 'Tela', value: '1.43 polegadas AMOLED tátil de alta definição (466x466 pixels)' },
-      { label: 'Resistência à Água', value: '5 ATM / 50 metros (próprio para natação e chuva)' },
-      { label: 'Autonomia da Bateria', value: 'Até 14 dias em uso típico ou 7 dias em uso intenso' },
-      { label: 'Sensores de Saúde', value: 'Monitor cardíaco contínuo, oxímetro SpO2, acelerômetro e sono' },
-      { label: 'Conectividade', value: 'Bluetooth 5.3 com notificações inteligentes de WhatsApp e chamadas' },
-      { label: 'Pulseira', value: 'Silicone esportivo hipoalergênico e substituível de 22 mm' },
-      { label: 'Compatibilidade', value: 'Celulares Android e iPhone com aplicativo totalmente em português' },
-      { label: 'Garantia', value: '12 meses oficial de fábrica com nota fiscal' }
-    ],
-    content: `### Design Ergonômico e Conforto no Pulso\n\nO relógio se destaca pelo acabamento sofisticado e caixa leve, que se ajusta com naturalidade ao contorno do braço. A pulseira macia não acumula suor durante treinos intensos e garante conforto até mesmo na hora de dormir para o rastreamento do sono.\n\n### Recursos de Notificações e Saúde\n\nAo ser pareado com o celular via Bluetooth, ele exibe mensagens do WhatsApp, identificação de chamadas e lembretes com vibração silenciosa. Os sensores monitoram batimentos cardíacos e níveis de oxigênio no sangue de maneira estável e constante.\n\n### Autonomia de Bateria e Veredito\n\nA bateria surpreende pela longevidade, dispensando recargas diárias e suportando até duas semanas de uso regular. É uma escolha certeira para quem busca praticidade e vida saudável sem pagar preços inflacionados.`,
-    verdict: 'Uma recomendação excelente de compra. Reúne beleza estética, ótima visibilidade de tela e sensores de saúde precisos por uma fração do preço dos relógios tradicionais.',
-    scoreCostBenefit: 4.9,
-    scorePerformance: 4.8,
-    scoreBuild: 4.8,
-    scoreUsability: 4.9,
-    faqs: [
-      { question: 'O relógio é compatível com celulares Android e iPhone?', answer: 'Sim, funciona perfeitamente em aparelhos Android e iOS através de aplicativo gratuito disponível na loja oficial em português.' },
-      { question: 'Posso tomar banho e nadar usando o relógio?', answer: 'Sim, a vedação e certificação à prova d água protegem contra suor, respingos, chuva e natação rasa.' },
-      { question: 'O produto acompanha nota fiscal e garantia?', answer: 'Sim, as compras realizadas pelos links das lojas oficiais parceiras acompanham nota fiscal eletrônica e garantia oficial de fábrica.' }
-    ]
-  };
-}
-
-function buildTvData(titleHint: string, store: string, ogImage?: string, priceHint?: string, originalPriceHint?: string) {
-  const cleanTitle = (titleHint && titleHint.length > 5 && !/^(magazine|loja|afiliad)/i.test(titleHint))
-    ? titleHint.charAt(0).toUpperCase() + titleHint.slice(1)
-    : 'Smart TV 50 Polegadas 4K UHD com HDR10+ e Comando de Voz';
-
-  const slug = generateSlug(cleanTitle) || 'smart-tv-50-polegadas-4k';
-  const priceCurrent = priceHint || 'R$ 2.199,00';
-  const priceOriginal = originalPriceHint || 'R$ 2.899,00';
-  const autoDiscount = calculateDiscountHelper(priceCurrent, priceOriginal);
-
-  return {
-    title: cleanTitle,
-    slug,
-    subtitle: 'Painel 4K com cores vibrantes, sistema rápido para streaming e som imersivo.',
-    category: 'Tecnologia & Dispositivos',
-    coverImage: ogImage || '/src/assets/images/review_smart_tv_1792358384274.jpg',
-    partnerStore: store,
-    priceCurrent,
-    priceOriginal,
-    discountPercent: autoDiscount?.label || '',
-    pros: [
-      'Resolução 4K UHD nítida com suporte a HDR10+ para cores vivas e pretos profundos',
-      'Sistema operacional rápido com inicialização instantânea dos principais aplicativos',
-      'Controle remoto inteligente com botões de atalho dedicados e comando de voz',
-      'Bordas ultrafinas que ampliam a sensação de imersão visual na sala'
-    ],
-    cons: [
-      'Áudio integrado atende bem no dia a dia, mas uma soundbar eleva a experiência para filmes de ação',
-      'Base de apoio exige rack com largura adequada'
-    ],
-    specifications: [
-      { label: 'Tamanho da Tela', value: '50 polegadas (Diagonal visual de 127 cm)' },
-      { label: 'Resolução', value: '4K Ultra HD (3840 x 2160 pixels)' },
-      { label: 'HDR', value: 'HDR10+ e HLG para alto alcance dinâmico' },
-      { label: 'Conexões', value: '3x HDMI 2.1, 2x USB, Wi-Fi 5GHz e Bluetooth' },
-      { label: 'Áudio', value: '20W RMS com decodificador Dolby Digital' },
-      { label: 'Garantia', value: '12 meses oficial com atendimento em domicílio' }
-    ],
-    content: `### Qualidade de Imagem e Cores\n\nO painel entrega excelente fidelidade visual com nitidez apurada até mesmo em transmissões de esportes ou cenas escuras de cinema. O processador faz um trabalho exemplar no dimensionamento de conteúdos mais antigos.\n\n### Sistema Operacional e Navegação\n\nA interface responde com velocidade aos comandos, sem travamentos entre Netflix, YouTube, Prime Video e canais ao vivo. O controle remoto simplifica a vida de toda a família.\n\n### Design e Acabamento\n\nCom perfil fino e acabamento traseiro limpo com canaletas para organização dos cabos, a televisão se integra harmonicamente a qualquer ambiente.`,
-    verdict: 'Uma das melhores opções do mercado para renovar a sala com qualidade de cinema sem comprometer o orçamento.',
-    scoreCostBenefit: 4.8,
-    scorePerformance: 4.8,
-    scoreBuild: 4.7,
-    scoreUsability: 4.9,
-    faqs: [
-      { question: 'A televisão é bivolt?', answer: 'Sim, alimentação automática bivolt (110V - 220V).' },
-      { question: 'Permite fixação em suporte de parede articulado?', answer: 'Sim, possui furação com padrão universal VESA.' }
-    ]
-  };
-}
-
-function buildAudioData(titleHint: string, store: string, ogImage?: string, priceHint?: string, originalPriceHint?: string) {
-  const cleanTitle = (titleHint && titleHint.length > 5 && !/^(magazine|loja|afiliad)/i.test(titleHint))
-    ? titleHint.charAt(0).toUpperCase() + titleHint.slice(1)
-    : 'Fone de Ouvido Sem Fio com Cancelamento Ativo de Ruído e Alta Definição';
-
-  const slug = generateSlug(cleanTitle) || 'fone-sem-fio-cancelamento-ruido';
-  const priceCurrent = priceHint || 'R$ 29,90';
-  const priceOriginal = originalPriceHint || 'R$ 59,90';
-  const autoDiscount = calculateDiscountHelper(priceCurrent, priceOriginal);
-
-  return {
-    title: cleanTitle,
-    slug,
-    subtitle: 'Isolamento acústico avançado, drivers dinâmicos com graves potentes e até 60h de bateria.',
-    category: 'Áudio & Fones',
-    coverImage: ogImage || '/src/assets/images/review_anc_headphones_1792355762654.jpg',
-    partnerStore: store,
-    priceCurrent,
-    priceOriginal,
-    discountPercent: autoDiscount?.label || '',
-    pros: [
-      'Cancelamento ativo de ruído híbrido que atenua zumbidos de trânsito e escritório',
-      'Bateria com autonomia excepcional de até 60 horas de reprodução contínua',
-      'Almofadas com espuma com memória que abraçam a orelha com maciez',
-      'Conexão multiponto para alternar entre o computador e o smartphone automaticamente'
-    ],
-    cons: [
-      'Microfone externo em locais abertos pode captar sopros de vento forte',
-      'Estojo de transporte rígido ocupa volume considerável na mochila'
-    ],
-    specifications: [
-      { label: 'Drivers de Áudio', value: '40 mm de alta resolução acústica' },
-      { label: 'Cancelamento de Ruído', value: 'ANC Híbrido com atenuação de até -35dB' },
-      { label: 'Autonomia da Bateria', value: 'Até 60 horas (ANC desligado) ou 45 horas (ANC ligado)' },
-      { label: 'Conectividade', value: 'Bluetooth 5.3 com pareamento rápido e cabo P2 3.5mm incluso' },
-      { label: 'Recarga Rápida', value: '10 minutos de carga rápida rendem até 5 horas de reprodução' },
-      { label: 'Garantia', value: '12 meses oficial do fabricante' }
-    ],
-    content: `### Isolamento e Qualidade Sonora\n\nO cancelamento ativo de ruído surpreende ao filtrar o burburinho de escritórios e ruídos constantes de transporte. O som entrega equilíbrio com agudos cristalinos e graves presentes sem distorção.\n\n### Conforto Durante Todo o Dia\n\nA tiara acolchoada distribui o peso de forma equilibrada, sem exercer pressão desconfortável sobre a cabeça mesmo durante turnos inteiros de trabalho.\n\n### Autonomia e Conectividade\n\nA bateria para 60 horas dispensa a necessidade de recargas semanais frequentes. A conexão dupla mantém o usuário conectado ao notebook e ao celular simultaneamente.`,
-    verdict: 'Uma recomendação imbatível para quem busca foco, produtividade e som de alto nível com excelente relação custo-benefício.',
-    scoreCostBenefit: 4.9,
-    scorePerformance: 4.8,
-    scoreBuild: 4.9,
-    scoreUsability: 4.8,
-    faqs: [
-      { question: 'Funciona com fio se a bateria esgotar?', answer: 'Sim, acompanha cabo de áudio P2 de 3,5 mm para uso mesmo sem bateria.' },
-      { question: 'É compatível com chamadas de WhatsApp e reuniões online?', answer: 'Sim, possui microfones integrados com cancelamento de eco perfeitos para videochamadas.' }
-    ]
-  };
-}
-
-function buildPeripheralData(titleHint: string, store: string, ogImage?: string, priceHint?: string, originalPriceHint?: string) {
-  const cleanTitle = (titleHint && titleHint.length > 5 && !/^(magazine|loja|afiliad)/i.test(titleHint))
-    ? titleHint.charAt(0).toUpperCase() + titleHint.slice(1)
-    : 'Teclado Mecânico Sem Fio Conexão Tripla com Amortecimento Acústico';
-
-  const slug = generateSlug(cleanTitle) || 'teclado-mecanico-sem-fio';
-  const priceCurrent = priceHint || 'R$ 449,90';
-  const priceOriginal = originalPriceHint || 'R$ 599,00';
-  const autoDiscount = calculateDiscountHelper(priceCurrent, priceOriginal);
-
-  return {
-    title: cleanTitle,
-    slug,
-    subtitle: 'Switches silenciosos lubrificados, layout ergonômico e acabamento premium para produtividade.',
-    category: 'Informática & Periféricos',
-    coverImage: ogImage || '/src/assets/images/review_mechanical_keyboard_1792355762298.jpg',
-    partnerStore: store,
-    priceCurrent,
-    priceOriginal,
-    discountPercent: autoDiscount?.label || '',
-    pros: [
-      'Acionamento suave e silencioso perfeito para escritórios compartilhados e digitação prolongada',
-      'Conexão tri-modo (Sem fio 2.4GHz, Bluetooth e Cabo Tipo-C) com alternância ágil',
-      'Teclas em polímero resistente que não desgastam nem perdem a textura fosca',
-      'Bateria interna recarregável que suporta semanas de produtividade sem cabo'
-    ],
-    cons: [
-      'Peso robusto que favorece a estabilidade na mesa mas é menos portátil na mochila',
-      'Software de customização de atalhos disponível principalmente para Windows'
-    ],
-    specifications: [
-      { label: 'Tipo de Switch', value: 'Mecânico linear pré-lubrificado com amortecimento em silicone' },
-      { label: 'Conexões', value: 'Sem fio 2.4GHz com adaptador USB, Bluetooth 5.0 e Cabo USB-C' },
-      { label: 'Bateria', value: '4000 mAh recarregável com autonomia de até 200 horas' },
-      { label: 'Layout', value: 'ABNT2 com teclas de perfil anatômico' },
-      { label: 'Compatibilidade', value: 'Windows, macOS, Linux, Android e iPadOS' },
-      { label: 'Garantia', value: '12 meses oficial com nota fiscal' }
-    ],
-    content: `### Experiência de Digitação e Ergonomia\n\nO toque nas teclas é macio e previsível, proporcionando conforto muscular após horas seguidas de trabalho ou estudo. As camadas de amortecimento interno absorvem o impacto das teclas, gerando um som suave e encorpado.\n\n### Conectividade Sem Fios e Produtividade\n\nA transição entre computador de trabalho e tablet pessoal se dá com um único atalho de tecla. A resposta via rádio 2.4GHz é imediata e sem atrasos.\n\n### Durabilidade e Construção\n\nA estrutura transmite firmeza sólida sobre a mesa, evitando qualquer flexão durante o uso intenso.`,
-    verdict: 'O upgrade ideal para quem passa o dia trabalhando no computador e deseja maior precisão, conforto e estética no espaço de trabalho.',
-    scoreCostBenefit: 4.9,
-    scorePerformance: 4.8,
-    scoreBuild: 4.9,
-    scoreUsability: 4.9,
-    faqs: [
-      { question: 'Funciona perfeitamente em computadores Apple Mac?', answer: 'Sim, suporta macOS nativamente com teclas de comando dedicadas.' }
-    ]
-  };
-}
-
-function buildKitchenData(titleHint: string, store: string, ogImage?: string, priceHint?: string, originalPriceHint?: string) {
-  const cleanTitle = (titleHint && titleHint.length > 5 && !/^(magazine|loja|afiliad)/i.test(titleHint))
-    ? titleHint.charAt(0).toUpperCase() + titleHint.slice(1)
-    : 'Fritadeira Elétrica Inteligente com Visor Frontal Transparente';
-
-  const slug = generateSlug(cleanTitle) || 'fritadeira-eletrica-inteligente';
-  const priceCurrent = priceHint || 'R$ 389,90';
-  const priceOriginal = originalPriceHint || 'R$ 529,00';
-  const autoDiscount = calculateDiscountHelper(priceCurrent, priceOriginal);
-
-  return {
-    title: cleanTitle,
-    slug,
-    subtitle: 'Capacidade ampla de 6 litros, circulação de ar 360° e cesto com iluminação interna.',
-    category: 'Casa Inteligente',
-    coverImage: ogImage || '/src/assets/images/review_smart_airfryer_1792355763307.jpg',
-    partnerStore: store,
-    priceCurrent,
-    priceOriginal,
-    discountPercent: autoDiscount?.label || '',
-    pros: [
-      'Visor transparente com lâmpada interna que permite ver o alimento sem abrir o cesto',
-      'Cesto amplo de 6 litros que prepara porções familiares de uma única vez',
-      'Revestimento cerâmico antiaderente de fácil limpeza',
-      'Controle preciso de temperatura e receitas pré-programadas de um toque'
-    ],
-    cons: [
-      'Dimensões generosas que exigem espaço dedicado na bancada da cozinha',
-      'Cabo de energia padrão de 1 metro'
-    ],
-    specifications: [
-      { label: 'Capacidade', value: '6 Litros de espaço útil' },
-      { label: 'Potência', value: '1800W com aquecimento por convecção 360°' },
-      { label: 'Temperatura', value: 'De 80°C a 200°C com controle digital' },
-      { label: 'Timer', value: 'Temporizador sonoro de até 60 minutos com desligamento automático' },
-      { label: 'Cesto', value: 'Antiaderente cerâmico lavável em lava-louças' },
-      { label: 'Garantia', value: '12 meses oficial do fabricante' }
-    ],
-    content: `### Praticidade do Visor Transparente\n\nO grande trunfo é poder acompanhar o ponto de douramento dos alimentos sem interromper o fluxo de calor. Isso economiza energia e resulta em alimentos mais crocantes.\n\n### Desempenho e Capacidade na Cozinha\n\nCom 1800W de potência e capacidade espaçosa de 6 litros, assa batatas, carnes e legumes com rapidez e textura uniforme sem necessidade de óleo.\n\n### Facilidade de Limpeza\n\nO cesto com revestimento antiaderente cerâmico não gruda resíduos e pode ser lavado facilmente com esponja macia ou colocado diretamente na lava-louças.`,
-    verdict: 'Uma das aquisições mais vantajosas para quem quer economizar tempo e ter uma rotina alimentar mais saudável e rápida.',
-    scoreCostBenefit: 4.8,
-    scorePerformance: 4.9,
-    scoreBuild: 4.7,
-    scoreUsability: 5.0,
-    faqs: [
-      { question: 'Pode ir na máquina de lavar louças?', answer: 'Sim, o cesto e a grelha interna são 100% compatíveis com lava-louças convencionais.' }
-    ]
-  };
-}
-
-function buildNotebookData(titleHint: string, store: string, ogImage?: string, priceHint?: string, originalPriceHint?: string) {
-  const cleanTitle = (titleHint && titleHint.length > 5 && !/^(magazine|loja|afiliad)/i.test(titleHint))
-    ? titleHint.charAt(0).toUpperCase() + titleHint.slice(1)
-    : 'Notebook de Alta Produtividade com SSD NVMe e Tela Full HD';
-
-  const slug = generateSlug(cleanTitle) || 'notebook-produtividade-ssd';
-  const priceCurrent = priceHint || 'R$ 2.499,00';
-  const priceOriginal = originalPriceHint || 'R$ 3.299,00';
-  const autoDiscount = calculateDiscountHelper(priceCurrent, priceOriginal);
-
-  return {
-    title: cleanTitle,
-    slug,
-    subtitle: 'Processador veloz para multitarefa, SSD de alta performance e tela antirreflexo com bordas finas.',
-    category: 'Informática & Periféricos',
-    coverImage: ogImage || '/src/assets/images/hero_tech_showcase_1792355762010.jpg',
-    partnerStore: store,
-    priceCurrent,
-    priceOriginal,
-    discountPercent: autoDiscount?.label || '',
-    pros: [
-      'Inicialização do sistema em segundos graças ao armazenamento SSD NVMe de alta velocidade',
-      'Tela com tratamento antirreflexo e excelente nitidez para leitura e trabalho prolongado',
-      'Teclado ergonômico e touchpad responsivo com suporte a gestos multitoque',
-      'Bateria com autonomia para até 7 horas em uso de produtividade e estudos'
-    ],
-    cons: [
-      'Para jogos pesados de última geração requer ajustes nas configurações gráficas',
-      'Slot de expansão de memória pode variar conforme a versão exata do chassi'
-    ],
-    specifications: [
-      { label: 'Processador (CPU)', value: 'Arquitetura multi-core de alto rendimento e baixo consumo' },
-      { label: 'Memória RAM', value: 'Memória DDR4/DDR5 de alta frequência com suporte a multitarefas' },
-      { label: 'Armazenamento', value: 'SSD NVMe PCIe de alta velocidade com leitura instantânea' },
-      { label: 'Tela e Painel', value: '15.6 polegadas Full HD (1920x1080) com acabamento antirreflexo' },
-      { label: 'Conectividade', value: 'Portas USB 3.2, USB Tipo-C, saída HDMI, Wi-Fi veloz e Bluetooth' },
-      { label: 'Bateria e Autonomia', value: 'Bateria com autonomia de até 6 a 8 horas em uso moderado' },
-      { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
-    ],
-    content: `### Desempenho e Produtividade Multitarefa\n\nO notebook entrega agilidade imediata para alternar entre planilhas pesadas, múltiplas abas no navegador e videochamadas sem engasgos. O SSD NVMe faz o sistema ligar em questão de segundos.\n\n### Qualidade de Tela e Conforto Visual\n\nA tela Full HD com acabamento fosco antirreflexo proporciona excelente conforto para os olhos, evitando reflexos de janelas ou lâmpadas de teto durante a jornada de trabalho.\n\n### Construção, Teclado e Portabilidade\n\nO chassi combina leveza para transporte em mochilas com rigidez estrutural adequada. O teclado apresenta curso de tecla macio e espaçamento anatômico.`,
-    verdict: 'Uma das melhores opções de compra para quem precisa de um computador ágil, moderno e confiável para trabalhar ou estudar sem lentidão.',
-    scoreCostBenefit: 4.9,
-    scorePerformance: 4.8,
-    scoreBuild: 4.7,
-    scoreUsability: 4.9,
-    faqs: [
-      { question: 'É possível fazer upgrade de memória RAM ou SSD no futuro?', answer: 'Sim, a maioria dos modelos dessa categoria permite a expansão do SSD ou memória RAM através de slots internos acessíveis.' },
-      { question: 'Acompanha carregador original na caixa?', answer: 'Sim, acompanha adaptador bivolt original de fábrica e cabo de energia padrão brasileiro.' },
-      { question: 'Roda programas de escritório e videochamadas simultâneas?', answer: 'Sim, executa com fluidez pacotes office, navegadores com muitas abas, Zoom, Google Meet e Teams.' }
-    ]
-  };
-}
-
-function buildSmartphoneData(titleHint: string, store: string, ogImage?: string, priceHint?: string, originalPriceHint?: string) {
-  const cleanTitle = (titleHint && titleHint.length > 5 && !/^(magazine|loja|afiliad)/i.test(titleHint))
-    ? titleHint.charAt(0).toUpperCase() + titleHint.slice(1)
-    : 'Smartphone com Conexão 5G, Câmera de Alta Resolução e Bateria Duradoura';
-
-  const slug = generateSlug(cleanTitle) || 'smartphone-5g-camera-bateria';
-  const priceCurrent = priceHint || 'R$ 1.399,00';
-  const priceOriginal = originalPriceHint || 'R$ 1.899,00';
-  const autoDiscount = calculateDiscountHelper(priceCurrent, priceOriginal);
-
-  return {
-    title: cleanTitle,
-    slug,
-    subtitle: 'Conexão 5G veloz, tela fluida de 120Hz e câmera versátil com inteligência artificial.',
-    category: 'Tecnologia & Dispositivos',
-    coverImage: ogImage || '/src/assets/images/hero_tech_showcase_1792355762010.jpg',
-    partnerStore: store,
-    priceCurrent,
-    priceOriginal,
-    discountPercent: autoDiscount?.label || '',
-    pros: [
-      'Tela fluida de alta taxa de atualização que torna a navegação perceptivelmente suave',
-      'Bateria generosa de 5000 mAh que suporta o dia todo com folga longe do carregador',
-      'Câmera principal com sensor de alta definição e inteligência artificial para fotos nítidas',
-      'Conectividade moderna com suporte a 5G e NFC para pagamentos por aproximação'
-    ],
-    cons: [
-      'Carregamento ultra-rápido máximo pode requerer adaptador compatível específico',
-      'Gravações de vídeo prolongadas em alta resolução consomem espaço rapidamente'
-    ],
-    specifications: [
-      { label: 'Processador (SoC)', value: 'Chipset Octa-Core de alta eficiência energética com suporte a 5G' },
-      { label: 'Tela e Painel', value: 'Painel com resolução Full HD+ e taxa de atualização fluida de 120Hz' },
-      { label: 'Câmera Principal', value: 'Sensor de alta definição com IA e modo noturno otimizado' },
-      { label: 'Bateria e Autonomia', value: '5000 mAh com suporte a recarga rápida' },
-      { label: 'Conectividade', value: '5G, Wi-Fi Dual Band, Bluetooth 5.3 e NFC para pagamentos' },
-      { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
-    ],
-    content: `### Fluidez de Tela e Experiência Visual\n\nA taxa de atualização elevada torna qualquer rolagem de redes sociais ou jogos perceptivelmente mais suave. O brilho da tela permite boa leitura sob o sol.\n\n### Qualidade Fotográfica e Versatilidade\n\nO sensor principal entrega fotos com cores vivas e bom alcance dinâmico para postagens imediatas. O modo noturno reduz ruídos em ambientes escuros.\n\n### Autonomia de Bateria para o Dia Todo\n\nA bateria entrega tranquilidade total para um dia inteiro de uso com redes sociais, streaming de música e navegação GPS sem necessidade de recarga no meio do dia.`,
-    verdict: 'Uma escolha equilibrada e certeira para quem deseja um celular moderno, com bateria confiável, câmeras competentes e tecnologia 5G.',
-    scoreCostBenefit: 4.8,
-    scorePerformance: 4.7,
-    scoreBuild: 4.8,
-    scoreUsability: 4.9,
-    faqs: [
-      { question: 'Possui NFC para pagamentos por aproximação na carteira digital?', answer: 'Sim, conta com NFC integrado compatível com Google Carteira e cartões bancários.' },
-      { question: 'Acompanha carregador na embalagem?', answer: 'Sim, a embalagem original oficial inclui cabo USB e carregador correspondente.' },
-      { question: 'Aceita dois chips SIM (Dual Chip)?', answer: 'Sim, possui bandeja Dual SIM para duas linhas ativas simultâneas.' }
-    ]
-  };
-}
-
-function buildGeneralData(titleHint: string, store: string, categoryName: string, ogImage?: string, priceHint?: string, originalPriceHint?: string) {
-  const cleanTitle = (titleHint && titleHint.length > 5 && !/^(magazine|loja|afiliad)/i.test(titleHint))
-    ? titleHint.charAt(0).toUpperCase() + titleHint.slice(1)
-    : 'Produto Selecionado com Alta Classificação e Custo-Benefício';
-
-  const slug = generateSlug(cleanTitle) || 'produto-selecionado';
-  const priceCurrent = priceHint || 'R$ 299,90';
-  const priceOriginal = originalPriceHint || 'R$ 399,00';
-  const autoDiscount = calculateDiscountHelper(priceCurrent, priceOriginal);
-
-  return {
-    title: cleanTitle,
-    slug,
-    subtitle: 'Análise aprofundada de custo-benefício, acabamento e principais recursos no uso diário.',
-    category: categoryName || 'Tecnologia & Dispositivos',
-    coverImage: ogImage || '/src/assets/images/hero_tech_showcase_1792355762010.jpg',
-    partnerStore: store,
-    priceCurrent,
-    priceOriginal,
-    discountPercent: autoDiscount?.label || '',
-    pros: [
-      'Construção reforçada com materiais de alta durabilidade e acabamento refinado',
-      'Desempenho estável e confiável mesmo sob uso contínuo e intenso',
-      'Excelente relação custo-benefício em comparação com concorrentes diretos',
-      'Operação intuitiva com configuração descomplicada desde o primeiro uso'
-    ],
-    cons: [
-      'Disponibilidade de estoque e variações de cor/voltagem podem oscilar',
-      'Requer leitura atenta dos detalhes de instalação e uso para melhor aproveitamento'
-    ],
-    specifications: [
-      { label: 'Construção e Materiais', value: 'Estrutura reforçada com acabamento fosco de alta resistência' },
-      { label: 'Conectividade e Padrões', value: 'Interfaces modernas de alta velocidade e compatibilidade universal' },
-      { label: 'Eficiência Energética', value: 'Projetado com baixo consumo e alto rendimento operacional' },
-      { label: 'Compatibilidade', value: 'Padrão multiplataforma compatível com os principais sistemas' },
-      { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
-    ],
-    content: `### Construção, Ergonomia e Acabamento\n\nO produto apresenta projeto sólido e cuidado nos detalhes de engenharia. Os encaixes são precisos e os materiais transmitem sensação imediata de confiabilidade.\n\n### Desempenho e Eficiência no Dia a Dia\n\nNos testes práticos de rotina, as funcionalidades operaram com estabilidade plena, entregando a performance anunciada sem superaquecimento ou falhas.\n\n### Relação Custo-Benefício e Veredito\n\nConsiderando a robustez dos componentes e o valor praticado na oferta atual, trata-se de uma recomendação sólida de compra para quem busca qualidade duradoura.`,
-    verdict: 'Uma recomendação segura e vantajosa. Cumpre com fidelidade o que promete e apresenta excelente índice de satisfação entre os compradores.',
-    scoreCostBenefit: 4.8,
-    scorePerformance: 4.8,
-    scoreBuild: 4.8,
-    scoreUsability: 4.8,
-    faqs: [
-      { question: 'O produto é original e acompanha nota fiscal?', answer: 'Sim, todos os links indicados direcionam para lojas oficiais com nota fiscal eletrônica e garantia oficial.' },
-      { question: 'Qual o prazo de garantia oferecido?', answer: 'Garantia legal e contratual de 12 meses direto pelo fabricante ou distribuidor oficial no Brasil.' }
-    ]
-  };
-}
-
-// Endpoint para identificação e autopreenchimento inteligente de produtos
+// Endpoint principal para identificação e criação automática completa (Review + SEO + Kit de Postagem)
 app.post('/api/analyze-product', async (req: Request, res: Response) => {
   try {
-    const { input } = req.body;
+    const { input, categories } = req.body || {};
 
-    if (!input || typeof input !== 'string') {
+    if (!input || typeof input !== 'string' || !input.trim()) {
       res.status(400).json({ error: 'O link ou nome do produto é obrigatório.' });
       return;
     }
 
-    const trimmedInput = input.trim();
-    const isUrl = /^https?:\/\//i.test(trimmedInput);
+    const availableCategories = await resolveAvailableCategories(categories);
+    const data = await generateFullProductReview({
+      input: input.trim(),
+      availableCategories,
+      baseUrl: getBaseUrl(req),
+    });
 
-    // 1. Identifica loja
-    const detectedStore = detectStore(trimmedInput);
-
-    // 2. Se for URL, faz raspagem prévia de metadados reais livres de afiliados
-    let pageTitle = '';
-    let metaDescription = '';
-    let ogImage = '';
-    let slugTitle = '';
-    let extractedPrice = '';
-    let extractedOriginalPrice = '';
-    let resolvedUrl = trimmedInput;
-    let extractedSnippet = '';
-
-    if (isUrl) {
-      const scraped = await scrapeUrlMetadata(trimmedInput);
-      pageTitle = scraped.pageTitle;
-      metaDescription = scraped.metaDescription;
-      ogImage = scraped.ogImage;
-      slugTitle = scraped.slugTitle;
-      resolvedUrl = scraped.resolvedUrl;
-      extractedPrice = scraped.extractedPrice;
-      extractedOriginalPrice = scraped.extractedOriginalPrice;
-      extractedSnippet = scraped.extractedSnippet || '';
-    }
-
-    // Compila sinais de texto limpos (sem repetição de links)
-    const combinedSignals = [
-      trimmedInput,
-      slugTitle,
-      pageTitle,
-      metaDescription,
-      extractedSnippet
-    ].join(' ');
-
-    // 3. Classifica o nicho com rigor para evitar confusão de categorias
-    const productType = classifyProduct(combinedSignals);
-
-    // Determina o nome mais limpo do produto (nunca nome de loja de afiliado)
-    let titleHint = '';
-    if (pageTitle && pageTitle.length > 4 && !/^(magazine|loja|vitrine|espa[cç]o)\s+[a-z0-9_-]+/i.test(pageTitle)) {
-      titleHint = cleanProductTitle(pageTitle);
-    } else if (slugTitle && slugTitle.length > 4) {
-      titleHint = cleanProductTitle(slugTitle);
-    } else if (!isUrl) {
-      titleHint = cleanProductTitle(trimmedInput);
-    }
-
-    // Se o titleHint estiver vazio ou for nome de loja, usa padrão pelo nicho
-    if (!titleHint || /^(magazine|loja|vitrine|espa[cç]o)\s+[a-z0-9_-]+/i.test(titleHint) || /^(mercado\s*li[bv]re|shopee|amazon)/i.test(titleHint)) {
-      if (productType === 'MOBILITY') titleHint = 'Bicicleta Elétrica Dobrável com Bateria de Lítio e Motor Potente';
-      else if (productType === 'WATCH') titleHint = 'Relógio Inteligente Smartwatch com Tela AMOLED e Monitor Cardíaco';
-      else if (productType === 'TV') titleHint = 'Smart TV 50 Polegadas 4K UHD com HDR10+';
-      else if (productType === 'AUDIO') titleHint = 'Fone de Ouvido Sem Fio com Cancelamento Ativo de Ruído';
-      else if (productType === 'NOTEBOOK') titleHint = 'Notebook de Alta Produtividade com SSD NVMe e Tela Full HD';
-      else if (productType === 'PERIPHERAL') titleHint = 'Teclado Mecânico Sem Fio Conexão Tripla';
-      else if (productType === 'KITCHEN') titleHint = 'Fritadeira Elétrica Inteligente com Visor';
-      else if (productType === 'SMARTPHONE') titleHint = 'Smartphone com Conexão 5G e Câmera de Alta Resolução';
-      else titleHint = 'Produto Selecionado com Alta Classificação';
-    }
-
-    // 4. Se tiver chave Gemini, tenta enriquecer mantendo a categoria estrita e dados limpos
-    if (apiKey) {
-      try {
-        const categoryInstruction = productType === 'MOBILITY'
-          ? 'ESTE PRODUTO É UMA BICICLETA ELÉTRICA / MOBILIDADE URBANA (bike, patinete, scooter). As especificações DEVEM ser de mobilidade elétrica (potência do motor em Watts, voltagem e capacidade da bateria de lítio, autonomia em km, aro/pneus, sistema de freios a disco duplo, velocidade máxima em km/h, peso suportado em kg).'
-          : productType === 'WATCH' 
-          ? 'ESTE PRODUTO É RIGOROSAMENTE UM RELÓGIO / SMARTWATCH. As especificações DEVEM ser de relógio (tela AMOLED/IPS, autonomia em dias, resistência à água 5 ATM/IP68, sensores de saúde, pulseira).'
-          : productType === 'TV'
-          ? 'ESTE PRODUTO É UMA SMART TV. Gere especificações reais de TV (resolução 4K UHD, polegadas, taxa Hz, sistema operacional, conexões HDMI 2.1, potência de áudio).'
-          : productType === 'AUDIO'
-          ? 'ESTE PRODUTO É UM FONE DE OUVIDO / ÁUDIO. Gere especificações reais (drivers mm, cancelamento de ruído ANC, autonomia em horas, Bluetooth, codecs).'
-          : productType === 'NOTEBOOK'
-          ? 'ESTE PRODUTO É UM NOTEBOOK / COMPUTADOR PORTÁTIL. Gere especificações reais de notebook (processador exato, memória RAM em GB, SSD NVMe em GB, tela em polegadas e resolução, portas, bateria em horas, sistema operacional, peso).'
-          : productType === 'PERIPHERAL'
-          ? 'ESTE PRODUTO É UM PERIFÉRICO / HARDWARE (teclado, mouse, monitor, etc.). Gere especificações técnicas do periférico correspondente.'
-          : productType === 'KITCHEN'
-          ? 'ESTE PRODUTO É UM ELETRODOMÉSTICO / CASA (fritadeira, cafeteira, robô). Gere especificações de eletrodoméstico (potência em Watts, capacidade em Litros, temperatura, timer, revestimento, voltagem).'
-          : productType === 'SMARTPHONE'
-          ? 'ESTE PRODUTO É UM SMARTPHONE / CELULAR. Gere especificações reais de celular (processador, memória RAM, armazenamento, câmera principal em MP, tela AMOLED 120Hz, bateria em mAh, 5G/NFC).'
-          : 'Identifique o produto real com base no título e na loja e forneça especificações técnicas verdadeiras do produto.';
-
-        const prompt = `
-Você é o mais experiente revisor técnico e analista de hardware, eletrônicos e produtos de consumo do Brasil.
-Analise com rigor absoluto este produto de e-commerce:
-- Entrada do usuário / URL: "${trimmedInput}"
-- Título extraído: "${titleHint}"
-- Trecho da página / Ficha técnica extraída: "${extractedSnippet}"
-- Descrição da loja: "${metaDescription}"
-- Loja parceira: "${detectedStore}"
-${extractedPrice ? `- Preço real anunciado extraído: "${extractedPrice}"` : ''}
-${extractedOriginalPrice ? `- Preço original sem desconto extraído: "${extractedOriginalPrice}"` : ''}
-
-DIRETRIZES DE CATEGORIA:
-${categoryInstruction}
-
-REGRAS DE CONTEÚDO TÉCNICO VERDADEIRO (CRÍTICO):
-1. O "title" DEVE ser o NOME REAL E COMPLETO DO PRODUTO (ex: "Bicicleta Elétrica Dobrável 9Cavalo 400W 48V" ou "Relógio Smartwatch D20 Bluetooth"). NUNCA coloque nomes de lojas de afiliados como "Magazine Fulano", "Loja do João", "Achados".
-2. NUNCA use termos em inglês soltos ("OFF", "Setup", "Gadgets", "Wireless", "Features"). Use termos naturais em português do Brasil.
-3. FICHA TÉCNICA VERDADEIRA ("specifications"): Deve conter entre 5 e 8 especificações de engenharia e componentes REAIS deste modelo exato:
-   - PROIBIÇÃO RIGOROSA: NUNCA gere itens genéricos de inventário como "Condição: Novo original na caixa lacrada", "Disponibilidade: Pronta entrega com garantia oficial", "Embalagem: Caixa". Isso arruína a credibilidade do site. Forneça APENAS dados técnicos do produto (Processador, Memória, Tela, Bateria, Potência, Dimensões, Sensores, etc.)!
-4. PRÓS E CONTRAS REAIS:
-   - "pros": 3 a 5 pontos fortes técnicos e de uso prático REAIS deste produto específico.
-   - "cons": 2 a 3 limitações honestas, pontos de atenção ou trade-offs reais deste modelo.
-5. ARTIGO E VEREDITO:
-   - "content": Artigo estruturado em Markdown com exatamente 3 seções:
-     ### Design, Materiais e Construção
-     ### Desempenho e Recursos no Uso Diário
-     ### Vale a Pena? Análise de Custo-Benefício
-     (Escreva parágrafos ricos em português com vocabulário técnico de especialista).
-   - "verdict": Veredito direto, sincero e conclusivo para o consumidor brasileiro.
-6. PERGUNTAS FREQUENTES ("faqs"):
-   - Entre 3 e 5 perguntas reais que compradores reais deste produto costumam fazer antes de fechar a compra (sobre voltagem, conectividade, upgrades, cabos inclusos, durabilidade), com respostas detalhadas e esclarecedoras.
-7. PREÇOS:
-${extractedPrice ? `   - Use OBRIGATORIAMENTE "${extractedPrice}" no campo "priceCurrent".` : '   - Forneça o preço de mercado real no Brasil no formato "R$ XX,XX".'}
-${extractedOriginalPrice ? `   - Use OBRIGATORIAMENTE "${extractedOriginalPrice}" no campo "priceOriginal".` : '   - Forneça o preço sem desconto no formato "R$ XX,XX".'}
-
-Retorne EXCLUSIVAMENTE um objeto JSON válido:
-{
-  "title": "Nome Real e Completo do Produto",
-  "slug": "url-amigavel-do-produto",
-  "subtitle": "Subtítulo explicativo com principal benefício técnico",
-  "category": "${
-    productType === 'MOBILITY' ? 'Mobilidade & Esportes' :
-    productType === 'WATCH' ? 'Relógios & Smartwatches' :
-    productType === 'TV' ? 'Tecnologia & Dispositivos' :
-    productType === 'AUDIO' ? 'Áudio & Fones' :
-    productType === 'NOTEBOOK' ? 'Informática & Periféricos' :
-    productType === 'PERIPHERAL' ? 'Informática & Periféricos' :
-    productType === 'KITCHEN' ? 'Casa Inteligente' :
-    productType === 'SMARTPHONE' ? 'Tecnologia & Dispositivos' : 'Tecnologia & Dispositivos'
-  }",
-  "partnerStore": "${detectedStore}",
-  "priceCurrent": "${extractedPrice || 'R$ 299,90'}",
-  "priceOriginal": "${extractedOriginalPrice || 'R$ 399,00'}",
-  "discountPercent": "Percentual calculado em português",
-  "pros": ["Ponto positivo específico 1", "Ponto positivo específico 2", "Ponto positivo específico 3", "Ponto positivo específico 4"],
-  "cons": ["Ponto de atenção específico 1", "Ponto de atenção específico 2"],
-  "specifications": [
-    {"label": "Especificação Técnica 1", "value": "Valor exato do produto"},
-    {"label": "Especificação Técnica 2", "value": "Valor exato do produto"},
-    {"label": "Especificação Técnica 3", "value": "Valor exato do produto"},
-    {"label": "Especificação Técnica 4", "value": "Valor exato do produto"},
-    {"label": "Especificação Técnica 5", "value": "Valor exato do produto"},
-    {"label": "Garantia Oficial", "value": "12 meses pelo fabricante com nota fiscal"}
-  ],
-  "content": "Artigo estruturado em seções '### Design, Materiais e Construção', '### Desempenho e Recursos no Uso Diário' e '### Vale a Pena? Análise de Custo-Benefício'.",
-  "verdict": "Veredito direto sobre o custo-benefício.",
-  "scoreCostBenefit": 4.9,
-  "scorePerformance": 4.8,
-  "scoreBuild": 4.8,
-  "scoreUsability": 4.9,
-  "faqs": [
-    {"question": "Pergunta comum e prática 1?", "answer": "Resposta detalhada 1"},
-    {"question": "Pergunta comum e prática 2?", "answer": "Resposta detalhada 2"},
-    {"question": "Pergunta comum e prática 3?", "answer": "Resposta detalhada 3"}
-  ]
-}
-`;
-
-        const geminiPromise = ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-            temperature: 0.2,
-            maxOutputTokens: 1800
-          }
-        });
-
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout Gemini')), 7000)
-        );
-
-        const response: any = await Promise.race([geminiPromise, timeoutPromise]);
-        const text = response.text || '';
-        const parsed = JSON.parse(text);
-
-        // Limpeza de segurança no título gerado pelo Gemini
-        parsed.title = cleanProductTitle(parsed.title || titleHint);
-
-        // Se extraímos preços reais do e-commerce, garanta a prioridade absoluta deles
-        if (extractedPrice) {
-          parsed.priceCurrent = extractedPrice;
-        }
-        if (extractedOriginalPrice) {
-          parsed.priceOriginal = extractedOriginalPrice;
-        }
-
-        // Recalcula o desconto com precisão matemática estrita
-        const calculatedDisc = calculateDiscountHelper(parsed.priceCurrent, parsed.priceOriginal);
-        parsed.discountPercent = calculatedDisc?.label || '';
-
-        // Filtra especificações para garantir que nenhuma seja texto genérico de inventário
-        if (Array.isArray(parsed.specifications)) {
-          parsed.specifications = parsed.specifications.filter((s: any) => 
-            s && s.label && !/condi[cç][aã]o|disponibilidade|pronta entrega|embalagem/i.test(s.label + ' ' + (s.value || ''))
-          );
-        }
-
-        // Remove quaisquer menções a cupons
-        delete parsed.couponCode;
-        delete parsed.couponDiscount;
-
-        // Validação anti-alucinação: se o usuário cadastrou relógio, Gemini NUNCA pode ter devolvido TV!
-        const parsedText = (parsed.title + ' ' + parsed.category + ' ' + (parsed.verdict || '')).toLowerCase();
-        const isWatchInput = productType === 'WATCH';
-        const hallucinatedTv = /televis|smart[ -]?tv|\btv\b|oled|qled|polegadas/i.test(parsedText);
-
-        if (isWatchInput && hallucinatedTv) {
-          console.warn('Alucinação de TV detectada para produto do tipo Relógio. Acionando gerador especializado de relógio.');
-          const watchData = buildWatchData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice);
-          res.json({ success: true, data: watchData });
-          return;
-        }
-
-        // Se ogImage existir na página raspada, anexa para enriquecer
-        if (ogImage && (!parsed.coverImage || !parsed.coverImage.startsWith('http'))) {
-          parsed.coverImage = ogImage;
-        }
-
-        res.json({ success: true, data: parsed });
-        return;
-      } catch (geminiError) {
-        console.warn('Chamada Gemini falhou ou atingiu cota, utilizando gerador especializado inteligente:', geminiError);
-      }
-    }
-
-    // 5. Gerador Especializado Garantido por Nicho (quando Gemini não responde ou falha)
-    let finalData;
-    if (productType === 'MOBILITY') {
-      finalData = buildMobilityData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice, extractedSnippet);
-    } else if (productType === 'WATCH') {
-      finalData = buildWatchData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice);
-    } else if (productType === 'TV') {
-      finalData = buildTvData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice);
-    } else if (productType === 'AUDIO') {
-      finalData = buildAudioData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice);
-    } else if (productType === 'NOTEBOOK') {
-      finalData = buildNotebookData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice);
-    } else if (productType === 'PERIPHERAL') {
-      finalData = buildPeripheralData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice);
-    } else if (productType === 'KITCHEN') {
-      finalData = buildKitchenData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice);
-    } else if (productType === 'SMARTPHONE') {
-      finalData = buildSmartphoneData(titleHint, detectedStore, ogImage, extractedPrice, extractedOriginalPrice);
-    } else {
-      finalData = buildGeneralData(titleHint, detectedStore, 'Tecnologia & Dispositivos', ogImage, extractedPrice, extractedOriginalPrice);
-    }
-
-    res.json({ success: true, data: finalData });
+    res.json({ success: true, data });
   } catch (error) {
     console.error('Erro geral no endpoint /api/analyze-product:', error);
     res.status(500).json({ error: 'Erro ao processar produto.' });
   }
 });
 
-// Endpoint dedicado para enriquecer Ficha Técnica, Prós/Contras, Artigo e FAQs com IA
+// Endpoint para enriquecer ou regenerar análise sem perder preço/loja/slug já definidos
 app.post('/api/enrich-details', async (req: Request, res: Response) => {
   try {
-    const { title, category, affiliateUrl } = req.body;
+    const {
+      title,
+      category,
+      affiliateUrl,
+      categories,
+      priceCurrent,
+      priceOriginal,
+      partnerStore,
+      slug,
+    } = req.body || {};
+
     if (!title || typeof title !== 'string' || title.trim().length < 2) {
       res.status(400).json({ error: 'Título do produto é obrigatório para extrair informações reais.' });
       return;
     }
 
-    const cleanTitle = cleanProductTitle(title.trim());
-    const combinedSignals = `${cleanTitle} ${category || ''} ${affiliateUrl || ''}`;
-    const productType = classifyProduct(combinedSignals);
-
-    if (apiKey) {
-      try {
-        const prompt = `
-Você é um especialista e revisor técnico sênior de hardware, eletrônicos e produtos de consumo no Brasil.
-O usuário está cadastrando este produto e precisa da FICHA TÉCNICA VERDADEIRA, PRÓS E CONTRAS REAIS, ARTIGO DE AVALIAÇÃO e PERGUNTAS FREQUENTES ESPECÍFICAS deste modelo exato:
-
-- Nome do Produto: "${cleanTitle}"
-- Categoria pretendida: "${category || 'Tecnologia & Dispositivos'}"
-${affiliateUrl ? `- Link de referência: "${affiliateUrl}"` : ''}
-
-REGRAS OBRIGATÓRIAS:
-1. FICHA TÉCNICA VERDADEIRA ("specifications"): Forneça entre 5 e 8 especificações de engenharia e componentes REAIS deste modelo (ex: Processador, Memória RAM, Armazenamento, Resolução de Tela, Autonomia de Bateria, Conectividade, Potência em Watts, Capacidade em Litros, Sensores, etc.).
-   PROIBIÇÃO RIGOROSA: NUNCA inclua textos de estoque como "Condição: Novo original na caixa lacrada", "Disponibilidade: Pronta entrega com garantia oficial", "Embalagem: Caixa". Apenas especificações técnicas reais do produto!
-2. PRÓS E CONTRAS REAIS:
-   - "pros": 3 a 5 pontos positivos técnicos e práticos REAIS deste modelo exato.
-   - "cons": 2 a 3 limitações honestas, pontos fracos ou cuidados de compra REAIS deste modelo.
-3. ARTIGO DE AVALIAÇÃO ("content"):
-   Escreva 3 seções detalhadas em Markdown:
-   ### Construção, Ergonomia e Design
-   ### Desempenho e Recursos no Uso Real
-   ### Vale a Pena Comprar? Custo-Benefício
-4. VEREDITO ("verdict"):
-   Conclusão concisa e confiável para orientar o comprador.
-5. PERGUNTAS FREQUENTES ("faqs"):
-   3 a 5 perguntas reais com respostas detalhadas que compradores reais costumam fazer sobre este produto específico.
-6. NOTAS (1.0 a 5.0):
-   scoreCostBenefit, scorePerformance, scoreBuild, scoreUsability.
-
-Retorne EXCLUSIVAMENTE um objeto JSON válido:
-{
-  "pros": ["string", "string", "string", "string"],
-  "cons": ["string", "string"],
-  "specifications": [
-    {"label": "string", "value": "string"}
-  ],
-  "content": "string com seções ###",
-  "verdict": "string",
-  "faqs": [
-    {"question": "string?", "answer": "string"}
-  ],
-  "scoreCostBenefit": 4.8,
-  "scorePerformance": 4.8,
-  "scoreBuild": 4.7,
-  "scoreUsability": 4.9
-}
-`;
-
-        const geminiPromise = ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-            temperature: 0.2,
-            maxOutputTokens: 1800
-          }
-        });
-
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout Gemini')), 7000)
-        );
-
-        const response: any = await Promise.race([geminiPromise, timeoutPromise]);
-        const text = response.text || '';
-        const parsed = JSON.parse(text);
-
-        // Limpeza de segurança para remover qualquer boilerplate genérico
-        if (Array.isArray(parsed.specifications)) {
-          parsed.specifications = parsed.specifications.filter((s: any) => 
-            s && s.label && !/condi[cç][aã]o|disponibilidade|pronta entrega|embalagem/i.test(s.label + ' ' + (s.value || ''))
-          );
-        }
-
-        res.json({ success: true, data: parsed });
-        return;
-      } catch (geminiError) {
-        console.warn('Enriquecimento com Gemini falhou, usando gerador especializado:', geminiError);
-      }
-    }
-
-    // Fallback inteligente garantido por nicho
-    let fallbackData;
-    if (productType === 'MOBILITY') fallbackData = buildMobilityData(cleanTitle, 'Loja Oficial');
-    else if (productType === 'NOTEBOOK') fallbackData = buildNotebookData(cleanTitle, 'Loja Oficial');
-    else if (productType === 'SMARTPHONE') fallbackData = buildSmartphoneData(cleanTitle, 'Loja Oficial');
-    else if (productType === 'WATCH') fallbackData = buildWatchData(cleanTitle, 'Loja Oficial');
-    else if (productType === 'TV') fallbackData = buildTvData(cleanTitle, 'Loja Oficial');
-    else if (productType === 'AUDIO') fallbackData = buildAudioData(cleanTitle, 'Loja Oficial');
-    else if (productType === 'PERIPHERAL') fallbackData = buildPeripheralData(cleanTitle, 'Loja Oficial');
-    else if (productType === 'KITCHEN') fallbackData = buildKitchenData(cleanTitle, 'Loja Oficial');
-    else fallbackData = buildGeneralData(cleanTitle, 'Loja Oficial', category || 'Tecnologia & Dispositivos');
-
-    res.json({
-      success: true,
-      data: {
-        pros: fallbackData.pros,
-        cons: fallbackData.cons,
-        specifications: fallbackData.specifications,
-        content: fallbackData.content,
-        verdict: fallbackData.verdict,
-        faqs: fallbackData.faqs,
-        scoreCostBenefit: fallbackData.scoreCostBenefit,
-        scorePerformance: fallbackData.scorePerformance,
-        scoreBuild: fallbackData.scoreBuild,
-        scoreUsability: fallbackData.scoreUsability
-      }
+    const availableCategories = await resolveAvailableCategories(categories);
+    const data = await generateFullProductReview({
+      input: title.trim(),
+      availableCategories,
+      baseUrl: getBaseUrl(req),
+      affiliateUrlHint: typeof affiliateUrl === 'string' ? affiliateUrl : '',
+      priceCurrentHint: typeof priceCurrent === 'string' ? priceCurrent : '',
+      priceOriginalHint: typeof priceOriginal === 'string' ? priceOriginal : '',
+      partnerStoreHint: typeof partnerStore === 'string' ? partnerStore : '',
+      slugHint: typeof slug === 'string' ? slug : '',
+      categoryHint: typeof category === 'string' ? category : '',
     });
+
+    res.json({ success: true, data });
   } catch (err) {
     console.error('Erro em /api/enrich-details:', err);
     res.status(500).json({ error: 'Erro ao extrair informações reais.' });
   }
 });
 
+// Endpoint dedicado para gerar/atualizar o Kit de Postagem (SEO + WhatsApp + Instagram + Shorts)
+app.post('/api/generate-post-kit', async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const title = String(body.title || '').trim();
+    if (!title) {
+      res.status(400).json({ error: 'Título é obrigatório para gerar o kit de postagem.' });
+      return;
+    }
+
+    const postKit = await generatePostKitWithAI({
+      title,
+      slug: String(body.slug || '').trim() || title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, ''),
+      priceCurrent: String(body.priceCurrent || 'Oferta'),
+      priceOriginal: body.priceOriginal ? String(body.priceOriginal) : '',
+      partnerStore: String(body.partnerStore || 'Loja Oficial'),
+      affiliateUrl: String(body.affiliateUrl || ''),
+      category: String(body.category || 'Tecnologia & Dispositivos'),
+      rating: Number(body.rating) || 4.8,
+      pros: Array.isArray(body.pros) ? body.pros.filter(Boolean) : [],
+      cons: Array.isArray(body.cons) ? body.cons.filter(Boolean) : [],
+      verdict: String(body.verdict || ''),
+      type: body.type === 'guide' ? 'guide' : 'review',
+      baseUrl: getBaseUrl(req),
+    });
+
+    res.json({ success: true, data: postKit });
+  } catch (err) {
+    console.error('Erro em /api/generate-post-kit:', err);
+    res.status(500).json({ error: 'Erro ao gerar kit de postagem.' });
+  }
+});
+
+// Endpoint automático para criação completa de Guias Comparativos sem conteúdo genérico
+app.post('/api/generate-guide', async (req: Request, res: Response) => {
+  try {
+    const {
+      topic,
+      category,
+      selectedReviews,
+      extraInputs,
+      categories,
+    } = req.body || {};
+
+    const availableCategories = await resolveAvailableCategories(categories);
+    const baseUrl = getBaseUrl(req);
+
+    const existingList: GuideInputProduct[] = Array.isArray(selectedReviews)
+      ? selectedReviews
+          .filter((item: any) => item && typeof item.title === 'string' && item.title.trim().length > 0)
+          .map((item: any) => ({
+            id: item.id,
+            title: String(item.title).trim(),
+            price: item.priceCurrent || item.price || '',
+            originalPrice: item.priceOriginal || item.originalPrice || '',
+            partnerStore: item.partnerStore || '',
+            affiliateUrl: item.affiliateUrl || '',
+            imageUrl: item.coverImage || item.imageUrl || '',
+            rating: Number(item.rating) || 4.8,
+            pros: Array.isArray(item.pros) ? item.pros : [],
+            cons: Array.isArray(item.cons) ? item.cons : [],
+            specifications: Array.isArray(item.specifications)
+              ? item.specifications
+              : Array.isArray(item.keySpecs)
+              ? item.keySpecs
+              : [],
+            verdict: item.verdict || item.summary || '',
+            subtitle: item.subtitle || '',
+            reviewSlug: item.slug || item.reviewSlug || undefined,
+          }))
+      : [];
+
+    const rawExtras: string[] = Array.isArray(extraInputs)
+      ? extraInputs.map((x: any) => String(x || '').trim()).filter((x: string) => x.length > 2)
+      : [];
+
+    const analyzedExtras: GuideInputProduct[] =
+      rawExtras.length > 0
+        ? await Promise.all(
+            rawExtras.slice(0, 5).map(async (rawInput, idx) => {
+              const rev = await generateFullProductReview({
+                input: rawInput,
+                availableCategories,
+                baseUrl,
+              });
+              return {
+                id: `prod-${Date.now()}-extra-${idx + 1}`,
+                title: rev.title,
+                price: rev.priceCurrent,
+                originalPrice: rev.priceOriginal,
+                partnerStore: rev.partnerStore,
+                affiliateUrl: rev.affiliateUrl,
+                imageUrl: rev.coverImage,
+                rating: rev.rating,
+                pros: rev.pros,
+                cons: rev.cons,
+                specifications: rev.specifications,
+                verdict: rev.verdict,
+                subtitle: rev.subtitle,
+              };
+            })
+          )
+        : [];
+
+    const combinedProducts = [...existingList, ...analyzedExtras];
+
+    if (combinedProducts.length === 0 && (!topic || !String(topic).trim())) {
+      res.status(400).json({ error: 'Selecione ao menos 1 produto, adicione links/nomes extras ou informe um tema para gerar o comparativo.' });
+      return;
+    }
+
+    const guide = await generateComparisonGuideWithAI({
+      topic: String(topic || '').trim(),
+      category: String(category || '').trim(),
+      products: combinedProducts,
+      availableCategories,
+      baseUrl,
+    });
+
+    res.json({ success: true, data: guide });
+  } catch (err) {
+    console.error('Erro em /api/generate-guide:', err);
+    res.status(500).json({ error: 'Erro ao gerar guia comparativo.' });
+  }
+});
+
+
+// Cache e leitor público do Firestore para Sitemap dinâmico e SEO Server-Side (SSR-Lite)
+interface SeoCatalog {
+  reviews: any[];
+  guides: any[];
+  categories: any[];
+  settings: Record<string, any> | null;
+  fetchedAt: number;
+}
+
+let seoCatalogCache: SeoCatalog | null = null;
+const SEO_CACHE_TTL_MS = 30_000;
+
+function getFirebaseRestConfig(): { projectId: string; apiKey: string; firestoreDatabaseId: string } | null {
+  try {
+    const raw = fs.readFileSync(path.resolve(__dirname, 'firebase-applet-config.json'), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed?.projectId && parsed?.apiKey) {
+      return {
+        projectId: parsed.projectId,
+        apiKey: parsed.apiKey,
+        firestoreDatabaseId: parsed.firestoreDatabaseId || '(default)'
+      };
+    }
+  } catch {
+    // Config ausente ou ilegível
+  }
+  return null;
+}
+
+function decodeFirestoreValue(val: any): any {
+  if (!val || typeof val !== 'object') return val;
+  if ('stringValue' in val) return val.stringValue;
+  if ('integerValue' in val) return Number(val.integerValue);
+  if ('doubleValue' in val) return Number(val.doubleValue);
+  if ('booleanValue' in val) return Boolean(val.booleanValue);
+  if ('timestampValue' in val) return val.timestampValue;
+  if ('nullValue' in val) return null;
+  if ('arrayValue' in val) {
+    return Array.isArray(val.arrayValue?.values) ? val.arrayValue.values.map(decodeFirestoreValue) : [];
+  }
+  if ('mapValue' in val) {
+    const obj: Record<string, any> = {};
+    const fields = val.mapValue?.fields || {};
+    for (const [k, v] of Object.entries(fields)) {
+      obj[k] = decodeFirestoreValue(v);
+    }
+    return obj;
+  }
+  return null;
+}
+
+function decodeFirestoreDoc(doc: any): Record<string, any> {
+  const obj: Record<string, any> = {};
+  const fields = doc?.fields || {};
+  for (const [k, v] of Object.entries(fields)) {
+    obj[k] = decodeFirestoreValue(v);
+  }
+  if (!obj.id && typeof doc?.name === 'string') {
+    const parts = doc.name.split('/');
+    obj.id = parts[parts.length - 1];
+  }
+  return obj;
+}
+
+async function fetchPublicCollection(cfg: { projectId: string; apiKey: string; firestoreDatabaseId: string }, collectionName: string): Promise<any[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3000);
+  try {
+    const dbName = encodeURIComponent(cfg.firestoreDatabaseId);
+    const url = `https://firestore.googleapis.com/v1/projects/${cfg.projectId}/databases/${dbName}/documents:runQuery?key=${cfg.apiKey}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: collectionName }],
+          limit: 300
+        }
+      }),
+      signal: controller.signal
+    });
+    if (!res.ok) return [];
+    const data: any = await res.json();
+    if (!Array.isArray(data)) return [];
+    return data
+      .filter((entry: any) => entry && entry.document)
+      .map((entry: any) => decodeFirestoreDoc(entry.document));
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function getSeoCatalog(): Promise<SeoCatalog> {
+  if (seoCatalogCache && Date.now() - seoCatalogCache.fetchedAt < SEO_CACHE_TTL_MS) {
+    return seoCatalogCache;
+  }
+
+  const cfg = getFirebaseRestConfig();
+  if (!cfg) {
+    return { reviews: [], guides: [], categories: [], settings: null, fetchedAt: Date.now() };
+  }
+
+  const [reviews, guides, categories, settingsDocs] = await Promise.all([
+    fetchPublicCollection(cfg, 'reviews'),
+    fetchPublicCollection(cfg, 'guides'),
+    fetchPublicCollection(cfg, 'categories'),
+    fetchPublicCollection(cfg, 'siteSettings')
+  ]);
+
+  reviews.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  guides.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  const globalSettings = settingsDocs.find(d => d.id === 'global') || settingsDocs[0] || null;
+
+  seoCatalogCache = {
+    reviews,
+    guides,
+    categories,
+    settings: globalSettings,
+    fetchedAt: Date.now()
+  };
+  return seoCatalogCache;
+}
+
+function getBaseUrl(req: Request): string {
+  const rawProto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0].trim();
+  const host = req.get('host') || 'localhost:3000';
+  const proto = /localhost|127\.0\.0\.1/.test(host) ? rawProto : 'https';
+  return `${proto}://${host}`;
+}
+
+function escapeHtml(str: string): string {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function toAbsoluteUrl(baseUrl: string, maybeRelative: string | undefined): string {
+  if (!maybeRelative) return '';
+  if (/^https?:\/\//i.test(maybeRelative)) return maybeRelative;
+  if (maybeRelative.startsWith('//')) return `https:${maybeRelative}`;
+  return `${baseUrl}${maybeRelative.startsWith('/') ? '' : '/'}${maybeRelative}`;
+}
+
+function injectSeoIntoHtml(baseHtml: string, req: Request, catalog: SeoCatalog): string {
+  const baseUrl = getBaseUrl(req);
+  const cleanPath = (req.path || '/').replace(/\/+$/, '') || '/';
+  const siteName = catalog.settings?.siteName || 'Achados & Reviews';
+
+  let title = `${siteName} – Melhores Compras, Análises e Ofertas Verificadas`;
+  let description = 'Descubra análises imparciais, comparativos completos e as melhores ofertas verificadas na Amazon, Mercado Livre e Shopee em tecnologia, casa e mobilidade.';
+  let ogType = 'website';
+  let ogImage = `${baseUrl}/src/assets/images/hero_tech_showcase_1792355762010.jpg`;
+  let canonical = `${baseUrl}${cleanPath === '/' ? '/' : cleanPath}`;
+  let noIndex = false;
+  let jsonLd: Record<string, unknown> | null = null;
+  let ssrRootHtml = '';
+
+  const reviews = catalog.reviews || [];
+  const guides = (catalog.guides || []).filter(g => g.published !== false);
+  const categories = catalog.categories || [];
+
+  if (cleanPath === '/admin') {
+    noIndex = true;
+    title = `Painel Administrativo | ${siteName}`;
+  } else if (cleanPath.startsWith('/reviews/')) {
+    const slug = decodeURIComponent(cleanPath.replace('/reviews/', ''));
+    const review = reviews.find(r => r.slug === slug || r.id === slug);
+    if (review) {
+      title = `${review.title} – Análise, Prós e Contras | ${siteName}`;
+      description = (review.subtitle || review.verdict || description).replace(/\s+/g, ' ').trim().slice(0, 160);
+      ogType = 'article';
+      if (review.coverImage) ogImage = toAbsoluteUrl(baseUrl, review.coverImage);
+
+      const cleanPrice = String(review.priceCurrent || '0')
+        .replace(/R\$\s*/gi, '')
+        .replace(/\./g, '')
+        .replace(',', '.')
+        .replace(/[^0-9.]/g, '');
+
+      const graph: Record<string, unknown>[] = [
+        {
+          '@type': 'BreadcrumbList',
+          itemListElement: [
+            { '@type': 'ListItem', position: 1, name: 'Início', item: `${baseUrl}/` },
+            { '@type': 'ListItem', position: 2, name: review.category || 'Avaliações', item: `${baseUrl}/` },
+            { '@type': 'ListItem', position: 3, name: review.title, item: canonical }
+          ]
+        },
+        {
+          '@type': 'Product',
+          name: review.title,
+          image: ogImage,
+          description,
+          category: review.category,
+          aggregateRating: {
+            '@type': 'AggregateRating',
+            ratingValue: review.rating || 4.8,
+            bestRating: '5.0',
+            worstRating: '1.0',
+            ratingCount: review.viewsCount ? Math.max(12, Math.floor(review.viewsCount / 40)) : 25
+          },
+          offers: {
+            '@type': 'Offer',
+            price: cleanPrice || '0.00',
+            priceCurrency: 'BRL',
+            availability: 'https://schema.org/InStock',
+            url: review.affiliateUrl,
+            seller: { '@type': 'Organization', name: review.partnerStore || 'Loja Oficial' }
+          }
+        },
+        {
+          '@type': 'Review',
+          itemReviewed: { '@type': 'Product', name: review.title },
+          reviewRating: { '@type': 'Rating', ratingValue: review.rating || 4.8, bestRating: '5.0' },
+          author: { '@type': 'Organization', name: siteName },
+          publisher: { '@type': 'Organization', name: siteName },
+          datePublished: review.createdAt,
+          dateModified: review.updatedAt || review.createdAt,
+          reviewBody: review.verdict || description
+        }
+      ];
+
+      if (Array.isArray(review.faqs) && review.faqs.length > 0) {
+        graph.push({
+          '@type': 'FAQPage',
+          mainEntity: review.faqs.map((f: any) => ({
+            '@type': 'Question',
+            name: f.question,
+            acceptedAnswer: { '@type': 'Answer', text: f.answer }
+          }))
+        });
+      }
+
+      jsonLd = { '@context': 'https://schema.org', '@graph': graph };
+
+      const prosList = Array.isArray(review.pros) ? review.pros.map((p: string) => `<li>${escapeHtml(p)}</li>`).join('') : '';
+      const consList = Array.isArray(review.cons) ? review.cons.map((c: string) => `<li>${escapeHtml(c)}</li>`).join('') : '';
+      const specsList = Array.isArray(review.specifications)
+        ? review.specifications.map((s: any) => `<dt>${escapeHtml(s.label)}</dt><dd>${escapeHtml(s.value)}</dd>`).join('')
+        : '';
+      const faqsList = Array.isArray(review.faqs)
+        ? review.faqs.map((f: any) => `<div><h3>${escapeHtml(f.question)}</h3><p>${escapeHtml(f.answer)}</p></div>`).join('')
+        : '';
+
+      ssrRootHtml = `<main class="max-w-4xl mx-auto px-4 py-8">
+        <nav aria-label="Breadcrumb"><a href="/">Início</a> / <span>${escapeHtml(review.category)}</span></nav>
+        <article>
+          <h1>${escapeHtml(review.title)}</h1>
+          <p>${escapeHtml(review.subtitle)}</p>
+          <p><strong>Preço:</strong> ${escapeHtml(review.priceCurrent)} — <strong>Loja:</strong> ${escapeHtml(review.partnerStore)}</p>
+          ${prosList ? `<h2>Pontos Positivos</h2><ul>${prosList}</ul>` : ''}
+          ${consList ? `<h2>Pontos de Atenção</h2><ul>${consList}</ul>` : ''}
+          ${specsList ? `<h2>Ficha Técnica</h2><dl>${specsList}</dl>` : ''}
+          <div>${escapeHtml(review.content)}</div>
+          ${review.verdict ? `<h2>Veredito Final</h2><p>${escapeHtml(review.verdict)}</p>` : ''}
+          ${faqsList ? `<h2>Perguntas Frequentes</h2>${faqsList}` : ''}
+        </article>
+      </main>`;
+    }
+  } else if (cleanPath.startsWith('/guias/')) {
+    const slug = decodeURIComponent(cleanPath.replace('/guias/', ''));
+    const guide = guides.find(g => g.slug === slug || g.id === slug);
+    if (guide) {
+      title = `${guide.title} | ${siteName}`;
+      description = (guide.subtitle || guide.introContent || description).replace(/\s+/g, ' ').trim().slice(0, 160);
+      ogType = 'article';
+      if (guide.coverImage) ogImage = toAbsoluteUrl(baseUrl, guide.coverImage);
+
+      const graph: Record<string, unknown>[] = [
+        {
+          '@type': 'BreadcrumbList',
+          itemListElement: [
+            { '@type': 'ListItem', position: 1, name: 'Início', item: `${baseUrl}/` },
+            { '@type': 'ListItem', position: 2, name: 'Guias Comparativos', item: `${baseUrl}/#guias-comparativos` },
+            { '@type': 'ListItem', position: 3, name: guide.title, item: canonical }
+          ]
+        },
+        {
+          '@type': 'Article',
+          headline: guide.title,
+          description,
+          image: ogImage,
+          datePublished: guide.createdAt,
+          dateModified: guide.updatedAt || guide.createdAt,
+          author: { '@type': 'Organization', name: siteName },
+          publisher: { '@type': 'Organization', name: siteName },
+          mainEntityOfPage: canonical
+        },
+        {
+          '@type': 'ItemList',
+          name: guide.title,
+          itemListElement: (guide.products || []).map((p: any, idx: number) => ({
+            '@type': 'ListItem',
+            position: idx + 1,
+            name: p.title,
+            description: p.summary,
+            image: p.imageUrl
+          }))
+        }
+      ];
+
+      if (Array.isArray(guide.faqs) && guide.faqs.length > 0) {
+        graph.push({
+          '@type': 'FAQPage',
+          mainEntity: guide.faqs.map((f: any) => ({
+            '@type': 'Question',
+            name: f.question,
+            acceptedAnswer: { '@type': 'Answer', text: f.answer }
+          }))
+        });
+      }
+
+      jsonLd = { '@context': 'https://schema.org', '@graph': graph };
+
+      const itemsHtml = (guide.products || []).map((p: any, i: number) => `
+        <section>
+          <h2>#${i + 1} ${escapeHtml(p.title)} (${escapeHtml(p.price)})</h2>
+          <p>${escapeHtml(p.summary)}</p>
+          ${p.reviewSlug ? `<a href="/reviews/${escapeHtml(p.reviewSlug)}">Ler análise completa</a>` : ''}
+        </section>`).join('');
+
+      ssrRootHtml = `<main class="max-w-4xl mx-auto px-4 py-8">
+        <nav aria-label="Breadcrumb"><a href="/">Início</a> / <span>Guias Comparativos</span></nav>
+        <article>
+          <h1>${escapeHtml(guide.title)}</h1>
+          <p>${escapeHtml(guide.subtitle)}</p>
+          <p>${escapeHtml(guide.introContent)}</p>
+          ${itemsHtml}
+        </article>
+      </main>`;
+    }
+  } else if (cleanPath.startsWith('/categoria/')) {
+    const catSlug = decodeURIComponent(cleanPath.replace('/categoria/', '')).toLowerCase();
+    const matchedCat = categories.find(c => String(c.slug || '').toLowerCase() === catSlug);
+    if (matchedCat) {
+      title = `${matchedCat.name}: Melhores Análises e Ofertas | ${siteName}`;
+      description = `${matchedCat.description || matchedCat.name}. Compare fichas técnicas, prós e contras e melhores preços verificados.`;
+      jsonLd = {
+        '@context': 'https://schema.org',
+        '@type': 'CollectionPage',
+        name: `${matchedCat.name} – ${siteName}`,
+        description,
+        url: canonical
+      };
+      const catReviews = reviews.filter(r => r.category === matchedCat.name);
+      const linksHtml = catReviews.map(r => `<li><a href="/reviews/${escapeHtml(r.slug)}">${escapeHtml(r.title)} - ${escapeHtml(r.priceCurrent)}</a></li>`).join('');
+      ssrRootHtml = `<main class="max-w-5xl mx-auto px-4 py-8">
+        <h1>${escapeHtml(matchedCat.name)}</h1>
+        <p>${escapeHtml(matchedCat.description)}</p>
+        <ul>${linksHtml}</ul>
+      </main>`;
+    }
+  } else if (cleanPath === '/sobre' || cleanPath === '/metodologia' || cleanPath === '/privacidade' || cleanPath === '/termos') {
+    const infoTitles: Record<string, { t: string; d: string }> = {
+      '/sobre': {
+        t: `Sobre Nós – Curadoria Independente | ${siteName}`,
+        d: 'Conheça o Achados & Reviews, nossa missão editorial independente e como selecionamos ofertas verificadas.'
+      },
+      '/metodologia': {
+        t: `Metodologia de Análise e Critérios | ${siteName}`,
+        d: 'Entenda nossos critérios de avaliação técnica: custo-benefício, desempenho, construção e segurança das lojas parceiras.'
+      },
+      '/privacidade': {
+        t: `Política de Privacidade e LGPD | ${siteName}`,
+        d: 'Saiba como tratamos dados, cookies de afiliados e privacidade no Achados & Reviews conforme a LGPD.'
+      },
+      '/termos': {
+        t: `Termos de Uso e Transparência | ${siteName}`,
+        d: 'Termos de uso, preços dinâmicos e aviso de transparência editorial de afiliados.'
+      }
+    };
+    title = infoTitles[cleanPath].t;
+    description = infoTitles[cleanPath].d;
+    ssrRootHtml = `<main class="max-w-4xl mx-auto px-4 py-8"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(description)}</p><a href="/">Voltar ao início</a></main>`;
+  } else {
+    // Home page SSR-lite link graph
+    jsonLd = {
+      '@context': 'https://schema.org',
+      '@graph': [
+        {
+          '@type': 'Organization',
+          name: siteName,
+          url: baseUrl,
+          description: catalog.settings?.tagline || description
+        },
+        {
+          '@type': 'WebSite',
+          name: siteName,
+          url: baseUrl,
+          description,
+          potentialAction: {
+            '@type': 'SearchAction',
+            target: `${baseUrl}/?search={search_term_string}`,
+            'query-input': 'required name=search_term_string'
+          }
+        }
+      ]
+    };
+
+    const guideLinks = guides.map(g => `<li><a href="/guias/${escapeHtml(g.slug)}">${escapeHtml(g.title)}</a></li>`).join('');
+    const reviewLinks = reviews.map(r => `<li><a href="/reviews/${escapeHtml(r.slug)}">${escapeHtml(r.title)} (${escapeHtml(r.priceCurrent)})</a></li>`).join('');
+    const catLinks = categories.map(c => `<li><a href="/categoria/${escapeHtml(c.slug)}">${escapeHtml(c.name)}</a></li>`).join('');
+
+    ssrRootHtml = `<main class="max-w-6xl mx-auto px-4 py-8">
+      <h1>${escapeHtml(siteName)} – Análises Imparciais e Melhores Ofertas</h1>
+      <p>${escapeHtml(description)}</p>
+      ${catLinks ? `<nav aria-label="Categorias"><ul>${catLinks}</ul></nav>` : ''}
+      ${guideLinks ? `<section><h2>Guias de Compra e Comparativos</h2><ul>${guideLinks}</ul></section>` : ''}
+      ${reviewLinks ? `<section><h2>Avaliações Recentes de Produtos</h2><ul>${reviewLinks}</ul></section>` : ''}
+      <footer>
+        <a href="/sobre">Sobre Nós</a> · <a href="/metodologia">Metodologia</a> · <a href="/privacidade">Privacidade</a> · <a href="/termos">Termos</a>
+      </footer>
+    </main>`;
+  }
+
+  let out = baseHtml;
+  out = out.replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtml(title)}</title>`);
+  out = out.replace(/<meta\s+name=["']description["'][^>]*>/i, `<meta name="description" content="${escapeHtml(description)}" />`);
+  out = out.replace(/<meta\s+name=["']robots["'][^>]*>/i, `<meta name="robots" content="${noIndex ? 'noindex, nofollow' : 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1'}" />`);
+  out = out.replace(/<meta\s+property=["']og:title["'][^>]*>/i, `<meta property="og:title" content="${escapeHtml(title)}" />`);
+  out = out.replace(/<meta\s+property=["']og:description["'][^>]*>/i, `<meta property="og:description" content="${escapeHtml(description)}" />`);
+  out = out.replace(/<meta\s+property=["']og:type["'][^>]*>/i, `<meta property="og:type" content="${ogType}" />`);
+  out = out.replace(/<meta\s+name=["']twitter:title["'][^>]*>/i, `<meta name="twitter:title" content="${escapeHtml(title)}" />`);
+  out = out.replace(/<meta\s+name=["']twitter:description["'][^>]*>/i, `<meta name="twitter:description" content="${escapeHtml(description)}" />`);
+
+  // Verificação Google Search Console dinâmica vinda do painel admin (se configurada)
+  const rawVerif = String(catalog.settings?.googleSiteVerification || '');
+  const verifMatch = rawVerif.match(/content=["']([^"']+)["']/i);
+  const verifToken = verifMatch ? verifMatch[1] : (!rawVerif.includes('.html') && !rawVerif.includes(':') ? rawVerif.trim() : '');
+  const extraVerifTag = verifToken && !out.includes(verifToken)
+    ? `<meta name="google-site-verification" content="${escapeHtml(verifToken)}" />\n    `
+    : '';
+
+  const headAdditions = `${extraVerifTag}<link rel="canonical" href="${escapeHtml(canonical)}" />
+    <meta property="og:url" content="${escapeHtml(canonical)}" />
+    <meta property="og:image" content="${escapeHtml(ogImage)}" />
+    <meta name="twitter:image" content="${escapeHtml(ogImage)}" />${
+      jsonLd
+        ? `\n    <script id="schema-org-jsonld" type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, '\\u003c')}</script>`
+        : ''
+    }`;
+
+  out = out.replace('</head>', `    ${headAdditions}\n  </head>`);
+
+  if (ssrRootHtml) {
+    out = out.replace('<div id="root"></div>', `<div id="root">${ssrRootHtml}</div>`);
+  }
+
+  return out;
+}
+
+// Endpoint para limpar cache SEO imediatamente ao salvar novo produto/guia no admin
+app.post('/api/seo-revalidate', (_req: Request, res: Response) => {
+  seoCatalogCache = null;
+  res.json({ success: true });
+});
+
 // Endpoint oficial de robots.txt para Googlebot e indexadores
 app.get('/robots.txt', (req: Request, res: Response) => {
-  const host = `${req.protocol}://${req.get('host')}`;
+  const baseUrl = getBaseUrl(req);
   res.type('text/plain');
-  res.send(`User-agent: *\nAllow: /\nDisallow: /admin\nSitemap: ${host}/sitemap.xml\n`);
+  res.send(`User-agent: *\nAllow: /\nDisallow: /admin\n\nSitemap: ${baseUrl}/sitemap.xml\n`);
 });
 
 // Endpoint para validação do Google Search Console via Arquivo HTML
@@ -1516,27 +710,74 @@ app.get('/google:id.html', (req: Request, res: Response) => {
   res.send(`google-site-verification: google${req.params.id}.html\n`);
 });
 
-// Endpoint dinâmico de sitemap.xml para Google Search Console
-app.get('/sitemap.xml', (req: Request, res: Response) => {
-  const host = `${req.protocol}://${req.get('host')}`;
+// Endpoint dinâmico de sitemap.xml lendo em tempo real do Firestore
+app.get('/sitemap.xml', async (req: Request, res: Response) => {
+  const baseUrl = getBaseUrl(req);
   const now = new Date().toISOString().split('T')[0];
-  const defaultSlugs = [
-    'teclado-mecanico-sem-fio-ergonomico',
-    'fritadeira-eletrica-inteligente-visor-duplo',
-    'fone-sem-fio-cancelamento-ativo-ruido',
-    'relogio-inteligente-smartwatch-titanium-amoled'
-  ];
+  const catalog = await getSeoCatalog();
+
+  const seenUrls = new Set<string>();
+  const urls: { loc: string; lastmod: string; changefreq: string; priority: string }[] = [];
+
+  const pushUrl = (pathSuffix: string, lastmod: string, changefreq: string, priority: string) => {
+    const loc = `${baseUrl}${pathSuffix.startsWith('/') ? pathSuffix : '/' + pathSuffix}`;
+    if (!seenUrls.has(loc)) {
+      seenUrls.add(loc);
+      urls.push({ loc, lastmod, changefreq, priority });
+    }
+  };
+
+  pushUrl('/', now, 'daily', '1.0');
+
+  // Páginas institucionais E-E-A-T
+  for (const staticPath of ['/sobre', '/metodologia', '/privacidade', '/termos']) {
+    pushUrl(staticPath, now, 'monthly', '0.5');
+  }
+
+  // Categorias dinâmicas
+  for (const cat of catalog.categories || []) {
+    if (cat?.slug) {
+      pushUrl(`/categoria/${encodeURIComponent(cat.slug)}`, now, 'weekly', '0.8');
+    }
+  }
+
+  // Guias comparativos publicados no Firestore
+  const publishedGuides = (catalog.guides || []).filter(g => g?.slug && g.published !== false);
+  for (const guide of publishedGuides) {
+    const mod = guide.updatedAt || guide.createdAt;
+    const dateStr = mod ? new Date(mod).toISOString().split('T')[0] : now;
+    pushUrl(`/guias/${encodeURIComponent(guide.slug)}`, dateStr, 'weekly', '0.95');
+  }
+
+  // Reviews individuais cadastrados no Firestore
+  for (const review of catalog.reviews || []) {
+    if (review?.slug) {
+      const mod = review.updatedAt || review.createdAt;
+      const dateStr = mod ? new Date(mod).toISOString().split('T')[0] : now;
+      pushUrl(`/reviews/${encodeURIComponent(review.slug)}`, dateStr, 'weekly', '0.9');
+    }
+  }
+
+  // Fallback seguro caso Firestore ainda não tenha sido populado
+  if ((catalog.reviews || []).length === 0) {
+    const fallbackSlugs = [
+      'celular-samsung-galaxy-s26-fe-128gb-8gb-ram-tela-6-7-azul-cobalto',
+      'notebook-dell-dc15-i51334u-a50-15-6-fhd-i5-8gb-512gb-win-11'
+    ];
+    for (const slug of fallbackSlugs) {
+      pushUrl(`/reviews/${slug}`, now, 'weekly', '0.9');
+    }
+  }
 
   let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
   xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n';
-  xml += `  <url>\n    <loc>${host}/</loc>\n    <lastmod>${now}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>1.0</priority>\n  </url>\n`;
-
-  for (const slug of defaultSlugs) {
-    xml += `  <url>\n    <loc>${host}/reviews/${slug}</loc>\n    <lastmod>${now}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.9</priority>\n  </url>\n`;
+  for (const u of urls) {
+    xml += `  <url>\n    <loc>${escapeHtml(u.loc)}</loc>\n    <lastmod>${u.lastmod}</lastmod>\n    <changefreq>${u.changefreq}</changefreq>\n    <priority>${u.priority}</priority>\n  </url>\n`;
   }
-
   xml += '</urlset>';
+
   res.type('application/xml');
+  res.setHeader('Cache-Control', 'public, max-age=60');
   res.send(xml);
 });
 
@@ -1545,27 +786,56 @@ async function startServer() {
   const port = parseInt(process.env.PORT || '3000', 10);
 
   // Serve static public folder, favicon and assets consistently
-  app.use(express.static(path.resolve(__dirname, 'public')));
+  app.use(express.static(path.resolve(__dirname, 'public'), { index: false }));
   app.use('/src/assets', express.static(path.resolve(__dirname, 'src/assets')));
   app.use('/assets', express.static(path.resolve(__dirname, 'public/assets')));
   app.use('/assets', express.static(path.resolve(__dirname, 'src/assets')));
+
+  const isHtmlRoute = (req: Request): boolean => {
+    if (req.method !== 'GET') return false;
+    const p = req.path || '/';
+    if (p.startsWith('/api/') || p.startsWith('/src/') || p.startsWith('/@') || p.startsWith('/node_modules/') || p.startsWith('/assets/')) {
+      return false;
+    }
+    if (/\.[a-zA-Z0-9]{2,6}$/.test(p) && !p.endsWith('.html')) return false;
+    return Boolean(req.accepts('html'));
+  };
 
   if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa'
     });
+
+    app.use(async (req: Request, res: Response, next: NextFunction) => {
+      if (!isHtmlRoute(req)) return next();
+      try {
+        const template = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf8');
+        const transformed = await vite.transformIndexHtml(req.originalUrl, template);
+        const catalog = await getSeoCatalog();
+        const finalHtml = injectSeoIntoHtml(transformed, req, catalog);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(finalHtml);
+      } catch (e) {
+        next(e);
+      }
+    });
+
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(__dirname, 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (_req: Request, res: Response) => {
-      const indexPath = path.resolve(distPath, 'index.html');
-      res.sendFile(indexPath, (err) => {
-        if (err) {
-          res.sendFile(path.resolve(__dirname, 'index.html'));
-        }
-      });
+    app.use(express.static(distPath, { index: false }));
+    app.get('*', async (req: Request, res: Response) => {
+      const distIndex = path.resolve(distPath, 'index.html');
+      const rootIndex = path.resolve(__dirname, 'index.html');
+      const targetIndex = fs.existsSync(distIndex) ? distIndex : rootIndex;
+      try {
+        const template = fs.readFileSync(targetIndex, 'utf8');
+        const catalog = await getSeoCatalog();
+        const finalHtml = injectSeoIntoHtml(template, req, catalog);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(finalHtml);
+      } catch {
+        res.sendFile(targetIndex);
+      }
     });
   }
 

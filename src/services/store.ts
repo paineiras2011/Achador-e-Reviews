@@ -285,6 +285,7 @@ export const StoreService = {
     // Sync to Firestore
     try {
       await setDoc(doc(db, 'reviews', cleanReview.id), cleanReview, { merge: true });
+      fetch('/api/seo-revalidate', { method: 'POST' }).catch(() => {});
     } catch (err) {
       console.warn(`Firestore save deferred for reviews/${cleanReview.id}:`, err);
     }
@@ -313,6 +314,7 @@ export const StoreService = {
       if (id !== targetId) {
         await deleteDoc(doc(db, 'reviews', id));
       }
+      fetch('/api/seo-revalidate', { method: 'POST' }).catch(() => {});
     } catch (err) {
       console.warn(`Firestore delete deferred/offline for reviews/${targetId}:`, err);
     }
@@ -543,6 +545,7 @@ export const StoreService = {
 
     try {
       await setDoc(doc(db, 'guides', cleanGuide.id), cleanGuide, { merge: true });
+      fetch('/api/seo-revalidate', { method: 'POST' }).catch(() => {});
     } catch (err) {
       console.warn(`Firestore save deferred for guides/${cleanGuide.id}:`, err);
     }
