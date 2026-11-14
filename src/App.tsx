@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { Hero } from './components/Hero';
 import { CategoryFilter } from './components/CategoryFilter';
@@ -56,6 +56,11 @@ export default function App() {
   const [reviewToEdit, setReviewToEdit] = useState<Review | null>(null);
   const [isGuideEditorModalOpen, setIsGuideEditorModalOpen] = useState(false);
   const [guideToEdit, setGuideToEdit] = useState<ComparisonGuide | null>(null);
+
+  const categoriesRef = useRef<Category[]>(categories);
+  categoriesRef.current = categories;
+  const isAdminLoggedInRef = useRef<boolean>(isAdminLoggedIn);
+  isAdminLoggedInRef.current = isAdminLoggedIn;
 
   // Initial Data Loading & Firestore synchronization
   const loadData = useCallback(async () => {
@@ -113,7 +118,7 @@ export default function App() {
       setCurrentView('info');
     } else if (cleanPath === '/admin') {
       setCurrentView('admin');
-      if (!isAdminLoggedIn) {
+      if (!isAdminLoggedInRef.current) {
         setIsLoginModalOpen(true);
       }
     } else {
@@ -121,8 +126,9 @@ export default function App() {
       setCurrentReviewSlug(null);
       setCurrentGuideSlug(null);
     }
-  }, [isAdminLoggedIn]);
+  }, []);
 
+  // Carregamento inicial único (evita loop infinito e resets de estado em formulários abertos)
   useEffect(() => {
     testFirestoreConnection();
     loadData();
@@ -134,17 +140,23 @@ export default function App() {
     if (qSearch) setSearchQuery(qSearch);
     if (qCat) setSelectedCategory(qCat);
 
-    applyRouteFromPath(window.location.pathname, categories);
+    applyRouteFromPath(window.location.pathname, categoriesRef.current);
 
     const handlePopState = () => {
-      applyRouteFromPath(window.location.pathname, categories);
+      applyRouteFromPath(window.location.pathname, categoriesRef.current);
     };
 
     // Atalho secreto de teclado para abrir o painel de administrador: Ctrl + Shift + A
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
         e.preventDefault();
-        handleOpenAdmin();
+        loadData();
+        if (isAdminLoggedInRef.current) {
+          setCurrentView('admin');
+          window.history.pushState({}, '', '/admin');
+        } else {
+          setIsLoginModalOpen(true);
+        }
       }
     };
 
@@ -155,7 +167,21 @@ export default function App() {
       window.removeEventListener('popstate', handlePopState);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [loadData, applyRouteFromPath, categories]);
+  }, [loadData, applyRouteFromPath]);
+
+  // Atualiza categoria selecionada caso categorias remotas cheguem após abertura direta em /categoria/...
+  useEffect(() => {
+    const cleanPath = window.location.pathname.replace(/\/+$/, '') || '/';
+    if (cleanPath.startsWith('/categoria/')) {
+      const catSlug = cleanPath.replace('/categoria/', '').toLowerCase();
+      const matched = categories.find(
+        c => c.slug.toLowerCase() === catSlug || c.name.toLowerCase() === decodeURIComponent(catSlug)
+      );
+      if (matched) {
+        setSelectedCategory(matched.name);
+      }
+    }
+  }, [categories]);
 
   // Handlers de Navegação
   const handleGoHome = () => {

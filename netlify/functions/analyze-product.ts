@@ -193,16 +193,29 @@ export default async (req: Request) => {
 
     const finalTitle = pageTitle || fallbackTitleFromUrl || (isShortener ? 'Produto Selecionado' : input.replace(/^https?:\/\/[^\/]+\//i, '').replace(/[-_]+/g, ' ').trim());
 
-    // Determina categoria pelo título
+    // Determina categoria pelo título e tipo exato
     const lower = finalTitle.toLowerCase();
     let category = 'Tecnologia & Dispositivos';
+    let isFitnessBike = false;
+    let isElectricBike = false;
+    let isConventionalBike = false;
     let isNotebook = false;
     let isWatch = false;
     let isAudio = false;
     let isKitchen = false;
 
-    if (/bicicleta|bike|scooter|patinete|el[eé]trica|mobilidade|ebike/i.test(lower)) {
+    if (/\b(bicicleta\s*ergom[eé]trica|bike\s*ergom[eé]trica|ergom[eé]trica|bicicleta\s*spinning|bike\s*spinning|spinning|roda\s*de\s*in[eé]rcia|volante\s*de\s*in[eé]rcia|bicicleta\s*horizontal|bicicleta\s*vertical|el[ií]ptico)\b/i.test(lower)) {
       category = 'Mobilidade & Esportes';
+      isFitnessBike = true;
+    } else if (
+      /\b(bicicleta\s*el[eé]trica|bike\s*el[eé]trica|e-?bike|patinete(\s*el[eé]trico)?|scooter(\s*el[eé]trica)?|monociclo(\s*el[eé]trico)?|hoverboard|moto\s*el[eé]trica|autopropelid[oa]|9cavalo)\b/i.test(lower) ||
+      (/\b(bicicleta|bike)\b/i.test(lower) && /\b(el[eé]tric[ao]|bateria\s*de\s*l[ií]tio|motor\s*\d{3,4}w|350w|500w|800w|48v|36v)\b/i.test(lower))
+    ) {
+      category = 'Mobilidade & Esportes';
+      isElectricBike = true;
+    } else if (/\b(bicicleta|bike|mountain\s*bike|\bmtb\b)\b/i.test(lower)) {
+      category = 'Mobilidade & Esportes';
+      isConventionalBike = true;
     } else if (/rel[oó]gio|smartwatch|watch|pulseira|smartband|wearable|cron[oó]grafo/i.test(lower)) {
       category = 'Relógios & Smartwatches';
       isWatch = true;
@@ -243,10 +256,19 @@ export default async (req: Request) => {
           apiKey,
           httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
         });
+        const productIdentityNote = isFitnessBike
+          ? 'Bicicleta Ergométrica / Spinning de academia indoor (NÃO É bicicleta elétrica — proibido citar motor elétrico, bateria de lítio, autonomia em km ou CONTRAN).'
+          : isConventionalBike
+          ? 'Bicicleta convencional sem motor elétrico.'
+          : isElectricBike
+          ? 'Mobilidade elétrica (com motor e bateria).'
+          : category;
+
         const prompt = `
-Você é um especialista em reviews de tecnologia, casa e consumo no Brasil.
-Analise este produto: "${finalTitle}" (Categoria: ${category}, Loja: ${detectedStore}, Preço: ${extractedPrice || 'consultar'}).
-Gere a FICHA TÉCNICA VERDADEIRA (especificações reais como capacidade em litros/GB, potência em Watts, processador, tela, bateria, voltagem), PRÓS E CONTRAS REAIS deste modelo exato, ARTIGO com 3 seções ###, FAQs específicas e postKit completo.
+Você é um especialista em reviews de tecnologia, casa, esportes e consumo no Brasil.
+Analise este produto: "${finalTitle}" (Tipo exato: ${productIdentityNote}, Loja: ${detectedStore}, Preço: ${extractedPrice || 'consultar'}).
+Gere a FICHA TÉCNICA VERDADEIRA (especificações reais fiéis ao tipo exato do produto), PRÓS E CONTRAS REAIS deste modelo exato, ARTIGO com 3 seções ###, FAQs específicas e postKit completo.
+REGRA CRÍTICA: Respeite 100% a identidade do produto. Se for bicicleta ergométrica/spinning, fale apenas de resistência mecânica/magnética, peso suportado, roda de inércia, monitor LCD a pilhas e ergonomia; nunca confunda com bicicleta elétrica.
 NUNCA use frases genéricas de estoque como "Condição: Novo original na caixa lacrada" ou "Disponibilidade: Pronta entrega".
 
 Retorne JSON no formato:
@@ -289,6 +311,10 @@ Retorne JSON no formato:
         const text = res.text || '';
         const parsed = JSON.parse(text);
 
+        if ((isFitnessBike || isConventionalBike) && /\b(motor\s*el[eé]trico|bateria\s*de\s*l[ií]tio|48v|36v|contran|emplacamento|autopropelid|cnh|quil[oô]metros\s*por\s*carga)\b/i.test(text)) {
+          throw new Error('Contaminação elétrica detectada em produto não elétrico');
+        }
+
         const data = {
           title: finalTitle.charAt(0).toUpperCase() + finalTitle.slice(1),
           slug: slug || `produto-${Date.now()}`,
@@ -302,7 +328,7 @@ Retorne JSON no formato:
           discountPercent: '',
           rating: 4.8,
           pros: parsed.pros || [`Ótimo equilíbrio técnico de ${finalTitle} na faixa de preço`],
-          cons: parsed.cons || ['Conferir voltagem e variações diretamente no anúncio oficial'],
+          cons: parsed.cons || ['Conferir especificações e variações diretamente no anúncio oficial'],
           specifications: (parsed.specifications || []).filter((s: any) => 
             s && s.label && !/condi[cç][aã]o|disponibilidade|pronta entrega|embalagem/i.test(s.label + ' ' + (s.value || ''))
           ),
@@ -328,7 +354,23 @@ Retorne JSON no formato:
     }
 
     // Fallback inteligente por categoria sem strings genéricas repetitivas
-    const fallbackSpecs = isNotebook ? [
+    const fallbackSpecs = isFitnessBike ? [
+      { label: 'Modalidade', value: /spinning/i.test(lower) ? 'Bike Spinning Residencial' : 'Bicicleta Ergométrica Residencial' },
+      { label: 'Sistema de Resistência', value: /magn[eé]tic/i.test(lower) ? 'Magnética silenciosa com ajuste de níveis' : 'Ajuste contínuo de intensidade de carga' },
+      { label: 'Painel Monitor (LCD)', value: 'Tempo, velocidade, distância e calorias (pilhas comuns, sem tomada)' },
+      { label: 'Ergonomia e Ajustes', value: 'Selim regulável em altura e pedais com cinta firma-pé' },
+      { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
+    ] : isConventionalBike ? [
+      { label: 'Modalidade', value: 'Bicicleta Convencional / Lazer e Passeio' },
+      { label: 'Transmissão', value: 'Sistema de marchas para percursos urbanos e parques' },
+      { label: 'Sistema de Frenagem', value: 'Freios dianteiro e traseiro conforme versão anunciada' },
+      { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
+    ] : isElectricBike ? [
+      { label: 'Motor Elétrico', value: 'Motor elétrico de alto torque para trajeto urbano' },
+      { label: 'Bateria', value: 'Bateria recarregável de Lítio com carregador bivolt' },
+      { label: 'Frenagem', value: 'Freios a disco dianteiro e traseiro' },
+      { label: 'Garantia', value: '12 meses oficial do fabricante com nota fiscal' }
+    ] : isNotebook ? [
       { label: 'Processador (CPU)', value: 'Arquitetura multi-core de alta eficiência e velocidade' },
       { label: 'Memória RAM', value: 'Memória DDR4/DDR5 com suporte a multitarefa ágil' },
       { label: 'Armazenamento', value: 'SSD NVMe PCIe de alta velocidade de leitura' },
@@ -379,7 +421,13 @@ Retorne JSON no formato:
         `Oferta verificada com envio seguro pela loja parceira ${detectedStore}`,
         'Garantia oficial de 12 meses com emissão de nota fiscal'
       ],
-      cons: [
+      cons: isFitnessBike ? [
+        'Requer montagem inicial simples com ferramentas básicas que costumam acompanhar o kit',
+        'Verifique o peso máximo suportado e a altura recomendada para o perfil do usuário'
+      ] : isConventionalBike ? [
+        'Enviada pré-montada na caixa, exigindo regulagem final de freios e marchas',
+        'Confira o tamanho ideal do quadro e do aro para sua estatura antes de finalizar'
+      ] : [
         'Variações de voltagem, cor ou capacidade devem ser conferidas antes de finalizar a compra',
         'Valor promocional sujeito à atualização de estoque do anunciante'
       ],

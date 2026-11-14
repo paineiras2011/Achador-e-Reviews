@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, 
   Save, 
@@ -146,7 +146,20 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
     { label: 'Tecnologia & Dispositivos Geral', url: '/src/assets/images/hero_tech_showcase_1792355762010.jpg' }
   ];
 
+  const initializedKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
+    if (!isOpen) {
+      initializedKeyRef.current = null;
+      return;
+    }
+
+    const targetKey = reviewToEdit ? `edit:${reviewToEdit.id}` : 'new';
+    if (initializedKeyRef.current === targetKey) {
+      return;
+    }
+    initializedKeyRef.current = targetKey;
+
     if (reviewToEdit) {
       setId(reviewToEdit.id);
       setTitle(reviewToEdit.title);
@@ -224,6 +237,12 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
     }
   }, [reviewToEdit, isOpen, categories]);
 
+  useEffect(() => {
+    if (isOpen && !category && categories.length > 0) {
+      setCategory(categories[0].name);
+    }
+  }, [isOpen, category, categories]);
+
   // Monitora alterações na URL da imagem para carregar status
   useEffect(() => {
     if (coverImage) {
@@ -235,7 +254,8 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
 
   // Magic Autocomplete Handler Resiliente (API -> Netlify Function -> Heurística Local)
   const handleMagicAutocomplete = async () => {
-    if (!magicInput.trim()) {
+    const rawTrimmed = magicInput.trim() || affiliateUrl.trim();
+    if (!rawTrimmed) {
       setMagicStatus({ type: 'error', message: 'Por favor, insira o link de afiliado ou o nome do produto.' });
       return;
     }
@@ -244,7 +264,11 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
     setMagicStatus(null);
     setFormError(null);
 
-    const trimmedInput = magicInput.trim();
+    const isBareAffiliateDomain = !/^https?:\/\//i.test(rawTrimmed) && /^(?:www\.|s\.shopee\.|shopee\.com|amzn\.to\/|a\.co\/|meli\.la\/|mercadolivre\.com|produto\.mercadolivre|amazon\.com|magalu\.me\/|magazineluiza\.com|magazinevoce\.com|kabum\.com|aliexpress\.com)/i.test(rawTrimmed);
+    const trimmedInput = isBareAffiliateDomain ? `https://${rawTrimmed}` : rawTrimmed;
+    if (/^https?:\/\//i.test(trimmedInput) && !affiliateUrl.trim()) {
+      setAffiliateUrl(trimmedInput);
+    }
     let resultData: any = null;
 
     const availableCategoryNames = categories.map(c => c.name);
@@ -329,15 +353,26 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
       // Categoria por palavras-chave
       const lower = extractedTitle.toLowerCase();
       let matchedCat = 'Tecnologia & Dispositivos';
+      let isFitnessBike = false;
+      let isConventionalBike = false;
       let isMobility = false;
       let isNotebook = false;
       let isWatch = false;
       let isAudio = false;
       let isKitchen = false;
 
-      if (/bicicleta|bike|scooter|patinete|el[eé]trica|mobilidade|ebike/i.test(lower)) {
+      if (/\b(bicicleta\s*ergom[eé]trica|bike\s*ergom[eé]trica|ergom[eé]trica|bicicleta\s*spinning|bike\s*spinning|spinning|roda\s*de\s*in[eé]rcia|volante\s*de\s*in[eé]rcia|bicicleta\s*horizontal|bicicleta\s*vertical|el[ií]ptico)\b/i.test(lower)) {
+        matchedCat = 'Mobilidade & Esportes';
+        isFitnessBike = true;
+      } else if (
+        /\b(bicicleta\s*el[eé]trica|bike\s*el[eé]trica|e-?bike|patinete(\s*el[eé]trico)?|scooter(\s*el[eé]trica)?|monociclo(\s*el[eé]trico)?|hoverboard|moto\s*el[eé]trica|autopropelid[oa]|9cavalo)\b/i.test(lower) ||
+        (/\b(bicicleta|bike)\b/i.test(lower) && /\b(el[eé]tric[ao]|bateria\s*de\s*l[ií]tio|motor\s*\d{3,4}w|350w|500w|800w|48v|36v)\b/i.test(lower))
+      ) {
         matchedCat = 'Mobilidade & Esportes';
         isMobility = true;
+      } else if (/\b(bicicleta|bike|mountain\s*bike|\bmtb\b)\b/i.test(lower)) {
+        matchedCat = 'Mobilidade & Esportes';
+        isConventionalBike = true;
       } else if (/rel[oó]gio|smartwatch|watch|pulseira|smartband/i.test(lower)) {
         matchedCat = 'Relógios & Smartwatches';
         isWatch = true;
@@ -365,9 +400,22 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
       const wattMatch = lower.match(/(\d+)\s*w(?:atts?)?\b/i);
       const ramMatch = lower.match(/(\d+\s*gb)\s*(?:de\s*)?(?:ram|mem[oó]ria)?/i);
       const ssdMatch = lower.match(/(\d+\s*(?:gb|tb))\s*(?:ssd|nvme|hd|armazenamento)/i);
+      const maxWeightMatch = lower.match(/(?:suporta\s*(?:at[eé]\s*)?|peso\s*m[aá]x(?:imo)?[:\s]*)(\d{2,3}\s*kg)/i);
+      const aroMatch = lower.match(/\b(aro\s*(?:12|14|16|20|24|26|27\.5|29))\b/i);
 
-      // Ficha técnica precisa por nicho (sem placeholders genéricos ou litragem inventada)
-      const dynamicSpecs = isMobility ? [
+      // Ficha técnica precisa por nicho (sem placeholders genéricos ou confusão elétrica vs ergométrica)
+      const dynamicSpecs = isFitnessBike ? [
+        { label: 'Modalidade', value: /spinning/i.test(lower) ? 'Bike Spinning Residencial' : 'Bicicleta Ergométrica Residencial' },
+        { label: 'Sistema de Resistência', value: /magn[eé]tic/i.test(lower) ? 'Magnética silenciosa com ajuste de níveis' : 'Ajuste contínuo de intensidade de carga' },
+        { label: 'Peso Máximo Suportado', value: maxWeightMatch ? maxWeightMatch[1] : '100 kg a 120 kg (conferir versão no anúncio)' },
+        { label: 'Painel Monitor (LCD)', value: 'Tempo, velocidade, distância e calorias (alimentação a pilhas)' },
+        { label: 'Garantia', value: 'Garantia do fabricante com nota fiscal' }
+      ] : isConventionalBike ? [
+        { label: 'Tamanho das Rodas', value: aroMatch ? aroMatch[1].toUpperCase() : 'Conforme versão anunciada' },
+        { label: 'Transmissão', value: 'Sistema de marchas para percursos urbanos e parques' },
+        { label: 'Sistema de Frenagem', value: 'Freios dianteiro e traseiro conforme versão' },
+        { label: 'Garantia', value: 'Garantia do fabricante com nota fiscal' }
+      ] : isMobility ? [
         { label: 'Motor e Potência', value: wattMatch ? `${wattMatch[1]}W de potência elétrica` : 'Motor elétrico de alto torque' },
         { label: 'Bateria e Alimentação', value: 'Bateria de Lítio Recarregável Bivolt' },
         { label: 'Autonomia Estimada', value: '20 a 35 km por carga (conforme relevo e peso)' },
@@ -434,7 +482,7 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
           `Disponibilidade verificada com nota fiscal na ${detectedStore}`
         ],
         cons: [
-          'Conferir voltagem, cor e capacidade exata nas variações do anúncio antes de fechar o pedido',
+          'Conferir especificações, dimensões e variações exatas do anúncio antes de fechar o pedido',
           'Preço promocional sujeito à alteração de estoque na loja parceira'
         ],
         specifications: dynamicSpecs,
@@ -446,7 +494,7 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
         scoreUsability: 4.9,
         faqs: [
           { question: `O ${extractedTitle} é original e acompanha nota fiscal?`, answer: `Sim, comprando através dos links verificados da ${detectedStore} o produto é enviado com nota fiscal eletrônica e garantia legal.` },
-          { question: `O que observar antes de comprar o ${extractedTitle}?`, answer: 'Verifique a variação selecionada (cor, capacidade ou voltagem 110V/220V) diretamente no anúncio oficial antes do pagamento.' }
+          { question: `O que observar antes de comprar o ${extractedTitle}?`, answer: 'Verifique medidas, variação selecionada e condições de montagem/garantia diretamente no anúncio oficial antes do pagamento.' }
         ],
         postKit: emergencyPostKit
       };
@@ -547,9 +595,9 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
 
   // Enriquecimento Dedicado de Ficha Técnica, Prós/Contras, Artigo e FAQs com IA
   const handleEnrichDetails = async () => {
-    const targetTitle = title.trim() || magicInput.trim();
+    const targetTitle = title.trim() || magicInput.trim() || affiliateUrl.trim();
     if (!targetTitle) {
-      setFormError('Informe o título do produto na Aba 1 para que a IA possa extrair a ficha técnica e perguntas frequentes reais.');
+      setFormError('Informe o título ou link de afiliado do produto para que a IA possa extrair a ficha técnica e perguntas frequentes reais.');
       setActiveTab('basic');
       return;
     }
@@ -710,9 +758,9 @@ export const ReviewEditorModal: React.FC<ReviewEditorModalProps> = ({
   );
 
   const handleGeneratePostKitOnly = async () => {
-    const targetTitle = title.trim() || magicInput.trim();
+    const targetTitle = title.trim() || magicInput.trim() || affiliateUrl.trim();
     if (!targetTitle) {
-      setFormError('Informe o Título da Avaliação na Aba 1 antes de gerar o Kit para Postagem.');
+      setFormError('Informe o Título da Avaliação ou Link de Afiliado antes de gerar o Kit para Postagem.');
       setActiveTab('basic');
       return;
     }

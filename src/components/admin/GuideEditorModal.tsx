@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ComparisonGuide,
   ComparisonProductItem,
@@ -96,8 +96,19 @@ export const GuideEditorModal: React.FC<GuideEditorModalProps> = ({
   // Form State
   const [formData, setFormData] = useState<ComparisonGuide>(() => createEmptyGuide(categories));
 
+  const initializedKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      initializedKeyRef.current = null;
+      return;
+    }
+
+    const targetKey = guide ? `edit:${guide.id}` : 'new';
+    if (initializedKeyRef.current === targetKey) {
+      return;
+    }
+    initializedKeyRef.current = targetKey;
 
     setErrorMsg('');
     setGenFeedback(null);
@@ -708,7 +719,7 @@ export const GuideEditorModal: React.FC<GuideEditorModalProps> = ({
         )}
 
         {/* Form Body */}
-        <form onSubmit={handleSave} className="p-6 overflow-y-auto flex-1 space-y-6 text-sm">
+        <form onSubmit={handleSave} noValidate className="p-6 overflow-y-auto flex-1 space-y-6 text-sm">
           {/* TAB 1: INFO */}
           {activeTab === 'info' && (
             <div className="space-y-4">

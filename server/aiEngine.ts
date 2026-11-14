@@ -1,7 +1,9 @@
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
 
 export type ProductNiche =
+  | 'FITNESS_BIKE'
   | 'MOBILITY'
+  | 'BICYCLE'
   | 'WATCH'
   | 'TV'
   | 'AUDIO'
@@ -725,8 +727,17 @@ export async function scrapeProductData(targetUrl: string): Promise<ScrapedMetad
 export function classifyProduct(allText: string): ProductNiche {
   const t = allText.toLowerCase();
 
-  if (/\b(bicicleta|bike|bici|patinete|scooter|e-bike|ebike|monociclo|hoverboard|moto el[eé]trica|9cavalo|tripulado|pedal)\b/i.test(t)) {
+  if (/\b(bicicleta\s*ergom[eé]trica|bike\s*ergom[eé]trica|ergom[eé]trica|bicicleta\s*spinning|bike\s*spinning|spinning|roda\s*de\s*in[eé]rcia|volante\s*de\s*in[eé]rcia|disco\s*de\s*in[eé]rcia|bicicleta\s*horizontal|bicicleta\s*vertical|el[ií]ptico|simulador\s*de\s*caminhada)\b/i.test(t)) {
+    return 'FITNESS_BIKE';
+  }
+  if (
+    /\b(bicicleta\s*el[eé]trica|bike\s*el[eé]trica|e-?bike|patinete(\s*el[eé]trico)?|scooter(\s*el[eé]trica)?|monociclo(\s*el[eé]trico)?|hoverboard|moto\s*el[eé]trica|autopropelid[oa]|9cavalo)\b/i.test(t) ||
+    (/\b(bicicleta|bike|bici)\b/i.test(t) && /\b(el[eé]tric[ao]|bateria\s*de\s*l[ií]tio|motor\s*\d{3,4}w|350w|500w|800w|1000w|48v|36v|60v|acelerador|pedal\s*assistido)\b/i.test(t))
+  ) {
     return 'MOBILITY';
+  }
+  if (/\b(bicicleta|bike|mountain\s*bike|\bmtb\b|caloi|oggi|ksw|sense)\b/i.test(t)) {
+    return 'BICYCLE';
   }
   if (/\b(rel[oó]gio|smartwatch|smart[ -]?band|watch|cron[oó]grafo|technos|casio|amazfit|galaxy watch|apple watch|g-shock|invicta|mormaii|mi band|garmin|fitbit)\b/i.test(t)) {
     return 'WATCH';
@@ -770,7 +781,9 @@ export function classifyProduct(allText: string): ProductNiche {
 
 export function resolveCategoryName(niche: ProductNiche, availableCategories?: string[]): string {
   const defaultMap: Record<ProductNiche, string> = {
+    FITNESS_BIKE: 'Mobilidade & Esportes',
     MOBILITY: 'Mobilidade & Esportes',
+    BICYCLE: 'Mobilidade & Esportes',
     WATCH: 'Relógios & Smartwatches',
     CONSOLE: 'Tecnologia & Dispositivos',
     CONNECTIVITY: 'Tecnologia & Dispositivos',
@@ -794,12 +807,16 @@ export function resolveCategoryName(niche: ProductNiche, availableCategories?: s
   const exact = availableCategories.find((c) => c.toLowerCase() === preferred.toLowerCase());
   if (exact) return exact;
 
-  // Fallbacks aproximados caso uma categoria como Mobilidade não exista no banco do usuário
+  // Fallbacks aproximados caso uma categoria como Mobilidade & Esportes não exista no banco do usuário
   if (niche === 'UTILITY') {
     const util = availableCategories.find((c) => /utilidad|casa|achado/i.test(c));
     if (util) return util;
   }
-  if (niche === 'MOBILITY') {
+  if (niche === 'FITNESS_BIKE') {
+    const fit = availableCategories.find((c) => /esport|fitness|sa[uú]de|bem[- ]?estar|mobilidad|casa/i.test(c));
+    if (fit) return fit;
+  }
+  if (niche === 'MOBILITY' || niche === 'BICYCLE') {
     const mob = availableCategories.find((c) => /mobilidad|esport|ve[ií]cul/i.test(c));
     if (mob) return mob;
     const tech = availableCategories.find((c) => /tecnolog/i.test(c));
@@ -923,7 +940,9 @@ function extractFactTokens(combinedText: string, scraped: ScrapedMetadata) {
     'Samsung', 'LG', 'Motorola', 'Xiaomi', 'Redmi', 'Poco', 'Apple', 'Dell', 'Lenovo',
     'Acer', 'Asus', 'HP', 'Sony', 'PlayStation', 'Xbox', 'Nintendo', 'Starlink', 'JBL',
     'Redragon', 'Logitech', 'HyperX', 'Amazfit', 'Garmin', 'Casio', 'Technos', '9Cavalo',
-    'Caloi', 'Tramontina', 'WAP', 'Kärcher', 'Makita', 'Bosch', 'Black+Decker',
+    'Caloi', 'Gallant', 'Kikos', 'Dream Fitness', 'Polimet', 'Acte Sports', 'PodiumFit', 'Odin Fit',
+    'WCT Fitness', 'ZiYou', 'Oggi', 'KSW', 'Sense', 'Houston',
+    'Tramontina', 'WAP', 'Kärcher', 'Makita', 'Bosch', 'Black+Decker',
   ];
   const detectedBrand =
     scraped.brand ||
@@ -943,6 +962,12 @@ function extractFactTokens(combinedText: string, scraped: ScrapedMetadata) {
   const autoMatch = combinedText.match(/\b(\d{2}(?:\s*a\s*|\s*-\s*\d{2})?\s*km)\b/i);
   const speedMatch = combinedText.match(/\b(\d{2}\s*km\/h)\b/i);
   const mpMatch = combinedText.match(/\b(\d{2,3}\s*MP)\b/i);
+  const maxWeightMatch = combinedText.match(/(?:suporta(?:\s*at[eé])?|peso\s*m[aá]x(?:imo)?(?:\s*suportado)?|at[eé])\s*[:\-]?\s*((?:1\d{2}|2\d{2}|[7-9]\d)\s*kg)/i);
+  const flywheelMatch =
+    combinedText.match(/(?:roda|volante|disco)\s*(?:de\s*)?in[eé]rcia\s*(?:de\s*)?(\d{1,2}(?:[.,]\d)?\s*kg)/i) ||
+    combinedText.match(/\b(?:spinning|ergom[eé]tric[ao])\b[^.\n]{0,35}\b([1-2]?\d(?:[.,]\d)?\s*kg)\b/i);
+  const wheelAroMatch = combinedText.match(/\b(aro\s*(?:12|14|16|20|24|26|27\.5|29))\b/i);
+  const gearsMatch = combinedText.match(/\b(\d{1,2}\s*(?:marchas|velocidades))\b/i);
   const modelCodeMatch = scraped.model || (combinedText.match(/\b([A-Z]{2,5}[-]?\d{2,5}[A-Z0-9-]*)\b/)?.[1] ?? '');
 
   return {
@@ -961,6 +986,10 @@ function extractFactTokens(combinedText: string, scraped: ScrapedMetadata) {
     autonomy: autoMatch?.[1] || '',
     speed: speedMatch?.[1] || '',
     mp: mpMatch?.[1] || '',
+    maxWeight: maxWeightMatch?.[1] || '',
+    flywheel: flywheelMatch?.[1] || '',
+    wheelAro: wheelAroMatch?.[1] || '',
+    gears: gearsMatch?.[1] || '',
   };
 }
 
@@ -1062,6 +1091,78 @@ export function synthesizeRichFallbackReview(params: {
       { question: `Como escolher a voltagem certa de ${cleanTitle}?`, answer: `Confira a opção 127V ou 220V na página do anúncio da ${store} conforme a rede elétrica da sua residência.` },
       { question: `Como conservar o revestimento por mais tempo?`, answer: `Evite choques térmicos com água fria logo após o uso, faça a pré-cura se indicado no manual e lave apenas com detergente neutro e lado macio da esponja.` },
     ];
+  } else if (niche === 'FITNESS_BIKE') {
+    const isSpinning = /spinning|in[eé]rcia/i.test(cleanTitle);
+    const isHorizontal = /horizontal/i.test(cleanTitle);
+    const resistanceLabel = /magn[eé]tic[ao]/i.test(combinedText)
+      ? 'Sistema magnético silencioso com seletor de níveis'
+      : /feltro|atrito|mec[aâ]nic[ao]/i.test(combinedText)
+      ? 'Resistência mecânica por atrito/feltro com ajuste contínuo'
+      : 'Sistema de ajuste progressivo de intensidade de carga';
+    const flywheelText = facts.flywheel ? `Roda de inércia de ${facts.flywheel}` : isSpinning ? 'Volante/roda de inércia equilibrado para cadência contínua' : 'Transmissão leve para cardio residencial';
+    const maxWeight = facts.maxWeight || '100 kg a 120 kg (confirmar versão no anúncio)';
+    const modalidade = isSpinning ? 'Bike Spinning Residencial / Indoor' : isHorizontal ? 'Bicicleta Ergométrica Horizontal (encosto lombar)' : 'Bicicleta Ergométrica Vertical Residencial';
+
+    addSpec('Modalidade', modalidade);
+    addSpec('Sistema de Resistência', resistanceLabel);
+    addSpec('Inércia / Transmissão', flywheelText);
+    addSpec('Peso Máximo Suportado', maxWeight);
+    addSpec('Painel Monitor (LCD)', 'Tempo, velocidade, distância, calorias gastas e odômetro (funciona a pilhas)');
+    addSpec('Ergonomia e Ajustes', 'Banco com regulagem de altura e pedais com cinta firma-pé antiderrapante');
+
+    subtitle = `Análise da ${cleanTitle}: tipo de resistência, ergonomia, painel monitor, peso suportado e silêncio no treino em casa.`;
+    pros = [
+      `Permite treinos aeróbicos e cardiovasculares completos em casa sem depender de clima ou mensalidade de academia`,
+      `Funcionamento silencioso sem consumo de energia elétrica da rede — ideal para uso em quartos, salas e apartamentos`,
+      facts.maxWeight ? `Estrutura metálica projetada para suportar até ${facts.maxWeight} com estabilidade` : 'Banco ajustável em altura e pedais com alça firma-pé para pedalada firme',
+      'Painel digital integrado para acompanhar tempo, distância, velocidade média e calorias durante a sessão',
+    ];
+    cons = [
+      'Requer montagem inicial simples em casa (fixação da base, pedais, selim e guidão seguindo o manual)',
+      `Verifique a altura máxima recomendada e o limite real de peso (${facts.maxWeight || 'geralmente 100–120 kg'}) antes de fechar a compra`,
+    ];
+    content = `### Sistema de Resistência, Estabilidade e Ruído\n\nA ${cleanTitle} foi desenvolvida para quem busca regularidade no condicionamento físico e queima calórica dentro de casa. Seu conjunto combina ${resistanceLabel.toLowerCase()} com ${isSpinning ? 'pegada esportiva para variação de cadência e treinos em pé ou sentado' : 'postura confortável para sessões diárias de baixo impacto nos joelhos e articulações'}.\n\n### Painel Monitor, Regulagens e Capacidade de Peso\n\nO computador de bordo em LCD exibe em tempo real dados essenciais como duração, velocidade, quilometragem simulada e gasto calórico estimado (alimentado por pilhas, dispensando tomada próxima). As regulagens do selim e das alças de pedal permitem adaptar o equipamento a diferentes estaturas da família.\n\n### Custo-Benefício Para Treinar em Casa\n\nNa faixa de ${priceCurrent} pela ${store}, representa um investimento prático que substitui deslocamentos e mensalidades recorrentes, ocupando pouco espaço no ambiente doméstico.`;
+    verdict = `Excelente escolha para quem quer praticar exercícios aeróbicos em casa com conforto, baixo ruído e ótima relação custo-benefício sem depender de academia.`;
+    faqs = [
+      { question: `A ${cleanTitle} precisa ser ligada na tomada?`, answer: `Não! A resistência e a pedalada são mecânicas/magnéticas e funcionam sem energia elétrica. Apenas o visor digital de tempo e calorias utiliza pilhas comuns (AA/AAA).` },
+      { question: `Qual o peso máximo suportado e serve para pessoas altas?`, answer: `${facts.maxWeight ? `A capacidade de referência informada é de até ${facts.maxWeight}` : 'Bicicletas ergométricas desta categoria costumam suportar entre 100 kg e 120 kg'}. Confira as medidas máximas do selim na ficha do anúncio na ${store} caso o usuário tenha mais de 1,85 m.` },
+      { question: `Ela faz muito barulho para usar em apartamento?`, answer: `Não, o sistema de transmissão foi projetado para operação silenciosa, permitindo pedalar enquanto assiste TV ou em horários noturnos sem incomodar vizinhos.` },
+    ];
+    rating = scraped.ratingHint || 4.7;
+    scoreCostBenefit = 4.9;
+    scorePerformance = 4.7;
+    scoreBuild = 4.6;
+    scoreUsability = 4.9;
+  } else if (niche === 'BICYCLE') {
+    const aro = facts.wheelAro ? facts.wheelAro.toUpperCase() : 'Aro 29 / Conforme versão';
+    const gears = facts.gears || 'Múltiplas velocidades (conferir câmbio no anúncio)';
+    addSpec('Tamanho das Rodas', aro);
+    addSpec('Relação / Marchas', gears);
+    addSpec('Quadro', /alum[ií]nio/i.test(combinedText) ? 'Liga de Alumínio leve e resistente à oxidação' : 'Estrutura em Aço Carbono ou Alumínio conforme anúncio');
+    addSpec('Sistema de Freios', /hidr[aá]ulico/i.test(combinedText) ? 'Freio a disco hidráulico' : /disco/i.test(combinedText) ? 'Freio a disco mecânico dianteiro e traseiro' : 'Freio V-Brake / Disco conforme versão');
+    addSpec('Modalidade', /mtb|mountain|trilha/i.test(combinedText) ? 'Mountain Bike (asfalto, parques e trilhas leves)' : 'Passeio urbano e lazer');
+
+    subtitle = `Análise da ${cleanTitle}: especificações de ${aro}, sistema de marchas, freios e recomendações antes da montagem.`;
+    pros = [
+      `Conjunto com ${aro} e ${gears} adequado para passeios urbanos, parques e deslocamentos sem combustível`,
+      /alum[ií]nio/i.test(combinedText) ? 'Quadro em alumínio traz menos peso ao pedalar e maior durabilidade contra ferrugem' : 'Geometria versátil para uso recreativo e trajetos diários',
+      `Ótimo posicionamento de preço na faixa de ${priceCurrent} pela ${store}`,
+    ];
+    cons = [
+      'Enviada pré-montada na caixa: recomenda-se ajuste fino de câmbio e freios em oficina local após a entrega',
+      'Confira o tamanho exato do quadro (15", 17", 19" ou 21") de acordo com a sua altura antes da compra',
+    ];
+    content = `### Quadro, ${aro} e Conjunto de Transmissão\n\nA ${cleanTitle} entrega uma configuração equilibrada para quem busca lazer ativo, mobilidade leve ou pedaladas em ciclovias e parques. A combinação de ${aro} com ${gears} facilita vencer pequenas subidas e manter boa rolagem no plano.\n\n### Freios, Conforto e Segurança\n\nPara maior segurança, verifique a calibragem dos pneus e o alinhamento dos freios antes das primeiras voltas, garantindo respostas precisas em frenagens urbanas.\n\n### Cuidados na Compra Online\n\nComo toda bicicleta comprada pela internet chega parcialmente desmontada para proteção no transporte, vale separar um pequeno orçamento para revisão e aperto final em bicicletaria especializada.`;
+    verdict = `Boa opção de bicicleta convencional para lazer e mobilidade diária, destacando a relação entre componentes e preço na ${store}.`;
+    faqs = [
+      { question: `A ${cleanTitle} já vem montada e regulada?`, answer: `Ela é enviada pré-montada na caixa para caber no frete (com roda dianteira, guidão e pedais soltos). Recomenda-se revisão e regulagem final de freios e marchas em uma bicicletaria antes do uso.` },
+      { question: `Como escolher o tamanho ideal do quadro?`, answer: `Para estaturas entre 1,65 m e 1,75 m costuma-se usar quadro 17"; entre 1,75 m e 1,85 m o quadro 19". Confira a tabela do fabricante na página da ${store}.` },
+    ];
+    rating = scraped.ratingHint || 4.7;
+    scoreCostBenefit = 4.8;
+    scorePerformance = 4.7;
+    scoreBuild = 4.6;
+    scoreUsability = 4.8;
   } else if (niche === 'MOBILITY') {
     const motor = facts.watts || '350W a 500W';
     const volt = facts.voltage || '48V';
@@ -1663,12 +1764,32 @@ export async function generateFullProductReview(params: {
         ? scraped.scrapedSpecs.map((s) => `- ${s.label}: ${s.value}`).join('\n')
         : 'Nenhuma tabela HTML direta; utilize os dados do título/pesquisa.';
 
+    const nicheLabelMap: Record<ProductNiche, string> = {
+      FITNESS_BIKE: 'Equipamento Fitness / Bicicleta Ergométrica ou Spinning (NÃO É bicicleta elétrica)',
+      BICYCLE: 'Bicicleta Convencional sem motor elétrico (NÃO É bicicleta elétrica)',
+      MOBILITY: 'Mobilidade Elétrica / Autopropelido (com motor e bateria)',
+      WATCH: 'Relógio / Smartwatch',
+      CONSOLE: 'Console de Videogame',
+      CONNECTIVITY: 'Conectividade / Internet',
+      CLIMATE: 'Climatização / Ar-condicionado',
+      KITCHEN_OVEN: 'Fritadeira / Forno Air Fryer Oven',
+      KITCHEN_APPLIANCE: 'Eletrodoméstico de Cozinha',
+      UTILITY: 'Utilidades Domésticas',
+      AUDIO: 'Áudio / Fones',
+      NOTEBOOK: 'Notebook / Laptop',
+      PERIPHERAL: 'Periférico / Informática',
+      TV: 'Smart TV / Televisor',
+      SMARTPHONE: 'Smartphone / Celular',
+      GENERAL: 'Produto Geral',
+    };
+
     const prompt = `Analise o produto abaixo e gere TODOS os recursos editoriais e de postagem em português do Brasil, de forma 100% ESPECÍFICA para este modelo exato.
 
 DADOS COLETADOS DO PRODUTO:
 - Entrada / URL: "${trimmedInput}"
 - URL Resolvida: "${scraped.resolvedUrl}"
 - Título extraído: "${titleHint || scraped.pageTitle || trimmedInput}"
+- Natureza exata do produto: "${nicheLabelMap[niche]}"
 - Marca detectada: "${scraped.brand || 'Extrair do título/pesquisa'}"
 - Modelo detectado: "${scraped.model || 'Extrair do título/pesquisa'}"
 - Loja Parceira: "${detectedStore}"
@@ -1681,12 +1802,13 @@ ${scrapedSpecsText}
 - Trecho extraído da página: "${scraped.extractedSnippet}"
 ${webResearchNotes ? `\nPESQUISA WEB EM TEMPO REAL DO MODELO:\n${webResearchNotes}` : ''}
 
-REGRAS ANTI-GENÉRICO OBRIGATÓRIAS:
-1. PROIBIDO texto genérico que sirva para qualquer produto (como "Construção reforçada com materiais de alta qualidade", "Condição: Novo na caixa", "Disponibilidade: Pronta entrega"). Cada prós, contra, especificação, parágrafo e FAQ DEVE citar características reais, medidas, capacidade (ex: litros, GB, Watts, polegadas, BTUs, material, voltagem) ou limitações reais DESTE modelo.
-2. O campo "title" deve ser limpo, natural e otimizado para pesquisa no Google (sem "- R$ XX,XX", sem "Frete Grátis", sem nome de loja afiliada).
-3. Em "content", escreva um artigo profundo em Markdown com 3 seções ### específicas para este produto (400 a 650 palavras no total).
-4. Em "postKit", crie cópias prontas para divulgação imediata no Google SEO, WhatsApp/Telegram, Instagram/Pinterest e roteiro de vídeo curto (Reels/TikTok/Shorts) já incluindo os benefícios reais e preço "${scraped.extractedPrice || fallback.priceCurrent}".
-5. Inclua o link do review ("${baseUrl ? baseUrl + '/reviews/' : '/reviews/'}[slug]") e menção à loja "${detectedStore}" no whatsappCopy.`;
+REGRAS ANTI-GENÉRICO E ANTI-CONFUSÃO OBRIGATÓRIAS:
+1. IDENTIDADE ESTRITA DO PRODUTO: Respeite exatamente a natureza do item informado no título e ficha ("${nicheLabelMap[niche]}"). Exemplo crítico: uma Bicicleta Ergométrica ou Spinning é equipamento de ginástica indoor (tem roda de inércia, resistência magnética/mecânica, peso máximo suportado, monitor LCD a pilha) e JAMAIS possui motor elétrico, bateria de lítio 48V, autonomia em km de rua ou regras do CONTRAN/CNH. Uma bicicleta convencional aro 29/26 também não é elétrica.
+2. PROIBIDO texto genérico que sirva para qualquer produto (como "Construção reforçada com materiais de alta qualidade", "Condição: Novo na caixa", "Disponibilidade: Pronta entrega"). Cada prós, contra, especificação, parágrafo e FAQ DEVE citar características reais deste modelo exato.
+3. O campo "title" deve ser limpo, natural e otimizado para pesquisa no Google (sem "- R$ XX,XX", sem "Frete Grátis", sem nome de loja afiliada).
+4. Em "content", escreva um artigo profundo em Markdown com 3 seções ### específicas para este produto (400 a 650 palavras no total).
+5. Em "postKit", crie cópias prontas para divulgação imediata no Google SEO, WhatsApp/Telegram, Instagram/Pinterest e roteiro de vídeo curto (Reels/TikTok/Shorts) já incluindo os benefícios reais e preço "${scraped.extractedPrice || fallback.priceCurrent}".
+6. Inclua o link do review ("${baseUrl ? baseUrl + '/reviews/' : '/reviews/'}[slug]") e menção à loja "${detectedStore}" no whatsappCopy.`;
 
     const response = await runWithTimeout(
       ai.models.generateContent({
@@ -1694,7 +1816,7 @@ REGRAS ANTI-GENÉRICO OBRIGATÓRIAS:
         contents: prompt,
         config: {
           systemInstruction:
-            'Você é um especialista sênior em análise técnica de produtos e marketing de afiliados no Brasil. Escreva apenas fatos técnicos específicos do modelo analisado, em português natural do Brasil, sem clichês genéricos.',
+            'Você é um especialista sênior em análise técnica de produtos e marketing de afiliados no Brasil. Escreva apenas fatos técnicos específicos e fiéis ao produto exato analisado, sem nunca confundir bicicleta ergométrica com bicicleta elétrica, sem clichês genéricos.',
           responseMimeType: 'application/json',
           responseSchema: REVIEW_RESPONSE_SCHEMA,
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
@@ -1705,6 +1827,17 @@ REGRAS ANTI-GENÉRICO OBRIGATÓRIAS:
     );
 
     const parsed = JSON.parse(response.text || '{}');
+
+    // Guarda de consistência: impede vazamento de dados de bicicleta elétrica em ergométricas/bicicletas comuns
+    if (niche === 'FITNESS_BIKE' || niche === 'BICYCLE') {
+      const generatedBlob = JSON.stringify(parsed || {});
+      const electricContamination = /\b(motor\s*el[eé]trico|bateria\s*de\s*l[ií]tio|48v|36v|contran|emplacamento|autopropelid|cnh|quil[oô]metros\s*por\s*carga|recarga\s*da\s*bateria)\b/i;
+      if (electricContamination.test(generatedBlob)) {
+        console.warn(`Descartando resposta contaminada por termos de bicicleta elétrica para ${niche}; usando síntese específica.`);
+        return fallback;
+      }
+    }
+
     const cleanTitle = cleanProductTitle(parsed.title || titleHint) || fallback.title;
     const finalSlug = (slugHint ? generateSlug(slugHint) : '') || generateSlug(parsed.slug || cleanTitle) || fallback.slug;
     const finalPriceCurrent = scraped.extractedPrice || fallback.priceCurrent;
